@@ -225,14 +225,18 @@ const btn = (act, txt, data = '', cls = '') => `<button class="${cls}" data-act=
 // ═════ composición de la partida y salas de voz ═════
 const PLURAL = { pueblerino: ['Pueblerino', 'Pueblerinos'], forastero: ['Forastero', 'Forasteros'], esbirro: ['Esbirro', 'Esbirros'], diablo: ['Diablo', 'Diablos'] };
 const COLOR = { pueblerino: '#5aa9ff', forastero: '#4fd1c5', esbirro: '#ff9f43', diablo: '#ff5c64' };
+function tablaDist(n) {
+  const filas = Object.keys(DIST).map(k => { const d = DIST[k]; return `<tr class="${+k === n ? 'actual' : ''}"><td><b>${k}</b></td><td>${d[0]}</td><td>${d[1]}</td><td>${d[2]}</td><td>${d[3]}</td></tr>`; }).join('');
+  return `<table class="grim"><tr><th>Jugadores</th><th>Pueblerinos</th><th>Forasteros</th><th>Esbirros</th><th>Diablo</th></tr>${filas}</table><small>Si hay Barón en juego: 2 Pueblerinos menos y 2 Forasteros más.</small>`;
+}
 function htmlComposicion() {
   const n = S.asientos.length;
   let c = S.composicion, tit;
   if (c) tit = `En esta partida (${n} jugadores) hay`;
-  else { const d = DIST[Math.max(3, Math.min(15, n))] || [0, 0, 0, 0]; c = { pueblerino: d[0], forastero: d[1], esbirro: d[2], diablo: d[3] }; tit = `Con ${n} jugadores se juega con`; }
+  else if (n < MIN) return `<div class="comp"><div class="aviso">👥 Hacen falta al menos <b>${MIN} jugadores</b> (sin contar al Narrador). Ahora hay ${n}.</div>${det('tabla', '📋 Tabla de jugadores', tablaDist(n))}</div>`;
+  else { const d = DIST[Math.min(15, n)]; c = { pueblerino: d[0], forastero: d[1], esbirro: d[2], diablo: d[3] }; tit = `Con ${n} jugadores se juega con`; }
   const chips = Object.keys(PLURAL).map(tp => `<span class="chip" style="border:1px solid ${COLOR[tp]}88"><b style="color:${COLOR[tp]}">${c[tp]}</b> ${PLURAL[tp][c[tp] === 1 ? 0 : 1]}</span>`).join('');
-  const filas = Object.keys(DIST).filter(k => +k >= 5).map(k => { const d = DIST[k]; return `<tr class="${+k === n ? 'actual' : ''}"><td><b>${k}</b></td><td>${d[0]}</td><td>${d[1]}</td><td>${d[2]}</td><td>${d[3]}</td></tr>`; }).join('');
-  const tabla = `<table class="grim"><tr><th>Jugadores</th><th>Pueblerinos</th><th>Forasteros</th><th>Esbirros</th><th>Diablo</th></tr>${filas}</table><small>Si hay Barón en juego: 2 Pueblerinos menos y 2 Forasteros más.</small>`;
+  const tabla = tablaDist(n);
   return `<div class="comp"><small>${tit}</small><div>${chips}</div>${det('tabla', '📋 Tabla de jugadores', tabla)}</div>`;
 }
 
@@ -279,7 +283,7 @@ function htmlNarrador() {
 
 function htmlPreparacion(G) {
   const n = S.asientos.length, set = new Set(G.rolesElegidos);
-  let [T, O, M, D] = DIST[Math.max(3, Math.min(15, n))] || [0, 0, 0, 0];
+  let [T, O, M, D] = DIST[Math.max(5, Math.min(15, n))];
   if (set.has('baron')) { T -= 2; O += 2; }
   const cuenta = tp => [...set].filter(r => ROLES[r].tipo === tp).length;
   const col = (tp, esp) => `<span class="${cuenta(tp) === esp ? 'ok' : 'aviso'}">${cuenta(tp)}/${esp}</span>`;
@@ -298,7 +302,7 @@ function htmlPreparacion(G) {
       ${asignados ? `<small class="ok">${asignados}/${n} jugadores con rol.</small>` : ''}</div>
     <div class="it"><b>3. Empieza</b>
       <div class="btns">${btn('iniciar', '🌙 Empezar partida (Noche 1)', n >= MIN && asignados === n ? '' : 'disabled', 'primario')}</div>
-      ${n < MIN ? `<small class="aviso">Hacen falta al menos ${MIN} jugadores.</small>` : n < 5 ? '<small class="aviso">Con menos de 5 jugadores la partida no está equilibrada.</small>' : ''}</div>`;
+      ${n < MIN ? `<small class="aviso">Hacen falta al menos ${MIN} jugadores (sin contar al Narrador). Ahora hay ${n}.</small>` : ''}</div>`;
 }
 
 function htmlFase(G) {

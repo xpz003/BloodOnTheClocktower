@@ -8,7 +8,7 @@ const { WebSocketServer } = require('ws');
 const { ROLES, FICHAS, DISTRIBUCION } = require('./roles.js');
 
 const PORT = process.env.PORT || 3000;
-const MIN_JUGADORES = 3, MAX_JUGADORES = 15;
+const MIN_JUGADORES = 5, MAX_JUGADORES = 15; // mínimo sin contar al Narrador
 
 const app = express();
 app.use(express.static(path.join(__dirname, 'public')));
@@ -82,7 +82,7 @@ function asignarCree(room) {
 }
 
 function sugerirRoles(n) {
-  const clave = Math.max(3, Math.min(15, n));
+  const clave = Math.max(5, Math.min(15, n));
   let [T, O, M, D] = DISTRIBUCION[clave];
   const pick = (tp, k) => shuffle(Object.keys(ROLES).filter(r => ROLES[r].tipo === tp)).slice(0, Math.max(0, k));
   const esbirros = pick('esbirro', M);

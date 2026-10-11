@@ -9,7 +9,7 @@ npm install
 npm start
 # abre http://localhost:3000
 ```
-Quien crea la sala es el **Narrador** (no cuenta como jugador). Los demás se unen con el código de 4 letras.
+Quien crea la sala es el **Narrador** (no cuenta como jugador). Hacen falta **5 jugadores como mínimo**, sin contar al Narrador (máximo 15). Los demás se unen con el código de 4 letras.
 El micrófono solo funciona en `localhost` o con **HTTPS** (para jugar por internet, despliega en Render/Railway/Fly.io o usa un túnel como cloudflared).
 
 ## Preparación (Narrador)
