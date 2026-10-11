@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no">
+<title>Aldea de Sombras</title>
+<style>
+  :root{
+    --tinta:#0f1220; --panel:#171b2eee; --panel2:#1f2440; --vela:#f0b550; --sangre:#e0474c; --musgo:#58c48e;
+    --texto:#ece8df; --tenue:#9a98a8; --borde:#ffffff1f;
+    --pueblerino:#5aa9ff; --forastero:#4fd1c5; --esbirro:#ff9f43; --diablo:#ff5c64;
+    --titulo:"Palatino Linotype","Book Antiqua",Palatino,Georgia,serif;
+    --ui:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%;background:var(--tinta);color:var(--texto);font-family:var(--ui);overflow:hidden}
+  button,select,input,textarea{font:inherit;color:inherit}
+  button{background:#2a3050;border:1px solid var(--borde);border-radius:8px;padding:.45rem .75rem;cursor:pointer}
+  button:hover{background:#343b63}
+  button:disabled{opacity:.45;cursor:not-allowed}
+  button:focus-visible,select:focus-visible,input:focus-visible,textarea:focus-visible,.asiento:focus-visible{outline:2px solid var(--vela);outline-offset:2px}
+  button.primario{background:var(--vela);color:#1b1408;border-color:transparent;font-weight:700}
+  button.primario:hover{background:#ffc766}
+  button.peligro{background:#6b2328} button.peligro:hover{background:#85303a}
+  button.sel,button.on{background:var(--vela);color:#1b1408;border-color:transparent;font-weight:700}
+  button.mini{padding:.15rem .45rem;font-size:.78rem;border-radius:6px}
+  input,select,textarea{background:#0d1020;border:1px solid var(--borde);border-radius:8px;padding:.4rem .55rem}
+  textarea{width:100%;resize:vertical;min-height:2.6rem}
+  .caja{background:var(--panel);border:1px solid var(--borde);border-radius:12px;backdrop-filter:blur(8px)}
+  [hidden]{display:none!important}
+  small,.tenue{color:var(--tenue)}
+
+  /* ── Entrada ── */
+  #inicio{position:fixed;inset:0;display:grid;place-items:center;z-index:20;background:
+    radial-gradient(ellipse at 50% 110%,#3a1d2a 0,transparent 60%),radial-gradient(ellipse at 50% -10%,#1d2850 0,transparent 55%),var(--tinta)}
+  #inicio .caja{padding:2rem;width:min(92vw,420px);display:grid;gap:.8rem}
+  #inicio h1{font-family:var(--titulo);font-size:2.6rem;margin:0;line-height:1}
+  #inicio p{margin:0;font-size:.92rem;line-height:1.4;color:var(--tenue)}
+  .fila{display:flex;gap:.5rem;align-items:center}
+  .fila>*{min-width:0}
+  #codigo{text-transform:uppercase;letter-spacing:.25em;text-align:center;flex:1}
+  #errorInicio{color:var(--sangre);min-height:1.2em;font-size:.9rem}
+
+  /* ── Juego ── */
+  #juego{position:fixed;inset:0;display:grid;grid-template-columns:1fr minmax(310px,400px)}
+  #mesa{position:relative;display:grid;place-items:center;overflow:hidden;min-height:0;padding-top:50px}
+  #circulo{position:relative}
+  #lateral{margin:10px 10px 10px 0;padding:.9rem;overflow:auto;min-height:0}
+  #top{position:fixed;top:10px;left:calc(50% - 205px);transform:translateX(-50%);padding:.4rem .8rem;display:flex;gap:.8rem;align-items:center;white-space:nowrap;z-index:6}
+  #fase{font-family:var(--titulo);font-size:1.1rem}
+  #reloj{font-variant-numeric:tabular-nums;color:var(--vela);min-width:3.2ch}
+  #cod{letter-spacing:.2em;font-weight:700;color:var(--vela)}
+  #log{position:fixed;top:62px;left:12px;width:min(300px,50vw);display:grid;gap:.3rem;pointer-events:none;z-index:5}
+  #log div{background:#0d1020e0;border-left:3px solid var(--vela);padding:.3rem .55rem;border-radius:4px;font-size:.82rem;line-height:1.3;animation:entra .25s ease-out}
+  #log div.priv{border-left-color:var(--sangre);background:#26121ae0}
+  @keyframes entra{from{opacity:0;transform:translateX(-8px)}to{opacity:1;transform:none}}
+  #barra{position:fixed;bottom:12px;left:calc(50% - 205px);transform:translateX(-50%);padding:.7rem .9rem;z-index:6;max-width:min(560px,94vw);text-align:center}
+  #barra h4{margin:0 0 .5rem;font-family:var(--titulo);font-size:1rem}
+  #barra .fila{justify-content:center;flex-wrap:wrap}
+  #toast{position:fixed;bottom:96px;left:calc(50% - 205px);transform:translateX(-50%);background:#000d;padding:.5rem .9rem;border-radius:8px;font-size:.9rem;z-index:30}
+
+  /* ── Círculo ── */
+  .asiento{position:absolute;transform:translate(-50%,-50%);width:var(--d);display:grid;justify-items:center;gap:2px;cursor:pointer;user-select:none;-webkit-tap-highlight-color:transparent;border-radius:12px}
+  .ficha{position:relative;width:var(--d);height:var(--d);border-radius:50%;display:grid;place-items:center;
+    background:radial-gradient(circle at 35% 30%,#4b4f68,#23273d 70%);border:3px solid #6e7391;box-shadow:0 4px 10px #0008;font-size:calc(var(--d)*.46);transition:transform .15s,box-shadow .2s,border-color .2s}
+  .asiento:hover .ficha{transform:scale(1.06)}
+  .ficha.oculta{font-family:var(--titulo);color:#8a8fb0}
+  .ficha.t-pueblerino{border-color:var(--pueblerino)} .ficha.t-forastero{border-color:var(--forastero)}
+  .ficha.t-esbirro{border-color:var(--esbirro)} .ficha.t-diablo{border-color:var(--diablo)}
+  .asiento.mio .ficha{box-shadow:0 0 0 3px #f0b55099,0 4px 12px #000a;border-color:var(--vela)}
+  .asiento.muerto .ficha{filter:grayscale(1) brightness(.55)}
+  .asiento.muerto .ficha::after{content:"💀";position:absolute;font-size:calc(var(--d)*.4);right:-4px;bottom:-4px;filter:none}
+  .asiento.sel .ficha{box-shadow:0 0 0 4px #fff,0 0 18px #fff8}
+  .asiento.elegido .ficha{box-shadow:0 0 0 4px var(--musgo),0 0 18px #58c48e99}
+  .asiento.atenuado{opacity:.35}
+  .asiento.bloque .ficha{box-shadow:0 0 0 4px var(--sangre),0 0 22px #e0474c99}
+  .asiento.nominado .ficha{box-shadow:0 0 0 4px #ffd166,0 0 22px #ffd16699}
+  .asiento.apunta .ficha{transform:scale(1.18);box-shadow:0 0 0 4px #fff,0 0 26px #fff}
+  .asiento.habla .ficha{box-shadow:0 0 0 4px #8dff7a,0 0 18px #8dff7a99}
+  .nom{font-size:calc(var(--d)*.2 + 3px);font-weight:600;max-width:calc(var(--d)*1.5);text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-shadow:0 1px 3px #000}
+  .sub{font-size:calc(var(--d)*.16 + 2px);color:var(--tenue);margin-top:-2px;white-space:nowrap}
+  .marcas{position:absolute;top:calc(var(--d)*-.18);right:calc(var(--d)*-.12);display:flex;gap:1px;font-size:calc(var(--d)*.3)}
+  .marcas.izq{right:auto;left:calc(var(--d)*-.12)}
+  .fichasP{position:absolute;left:50%;top:calc(var(--d)*.86);transform:translateX(-50%);display:flex;gap:1px;font-size:calc(var(--d)*.26);filter:drop-shadow(0 1px 2px #000)}
+
+  /* ── Reloj central ── */
+  #relojMesa{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);border-radius:50%;
+    background:radial-gradient(circle,#1a1e33,#12152a);border:2px solid #ffffff22;display:grid;place-items:center;pointer-events:none}
+  #relojMesa::before{content:"";position:absolute;inset:7%;border-radius:50%;border:1px dashed #ffffff22}
+  #manecilla{position:absolute;left:50%;bottom:50%;width:6px;margin-left:-3px;border-radius:3px;background:linear-gradient(#fff,#f0b550);
+    transform-origin:50% 100%;transition:transform .8s cubic-bezier(.4,0,.2,1),opacity .3s;box-shadow:0 0 10px #f0b55099;opacity:.12}
+  #manecilla.activa{opacity:1}
+  #manecilla::before{content:"";position:absolute;top:-8px;left:-5px;border:8px solid transparent;border-bottom:14px solid #fff;border-top:0}
+  #eje{position:absolute;width:14px;height:14px;border-radius:50%;background:#f0b550;box-shadow:0 0 8px #000}
+  #centroTxt{position:absolute;left:50%;top:50%;transform:translate(-50%,calc(-50% + var(--dy,34px)));text-align:center;font-size:.8rem;line-height:1.25;width:78%;color:var(--texto);text-shadow:0 1px 4px #000}
+  #centroTxt b{font-family:var(--titulo);font-size:1.05em;color:var(--vela)}
+  .noche #relojMesa{background:radial-gradient(circle,#0b1030,#070a1c)}
+  .noche #mesa{background:radial-gradient(ellipse at 50% 50%,#0d1438,transparent 70%)}
+
+  /* ── Panel lateral ── */
+  #lateral h3{margin:.2rem 0 .5rem;font-family:var(--titulo);font-size:1.1rem}
+  #lateral details{border-top:1px solid var(--borde);padding:.5rem 0}
+  #lateral summary{cursor:pointer;font-weight:600;font-size:.92rem;padding:.1rem 0}
+  #lateral .it{border-top:1px solid #ffffff12;padding:.5rem 0;font-size:.86rem;line-height:1.4}
+  #lateral .it:first-child{border-top:0}
+  #lateral .btns{display:flex;flex-wrap:wrap;gap:.3rem;margin:.35rem 0}
+  #lateral label.chk{display:inline-flex;align-items:center;gap:.3rem;font-size:.82rem;padding:.15rem .4rem;border:1px solid var(--borde);border-radius:999px;cursor:pointer;margin:.12rem}
+  #lateral label.chk input{margin:0}
+  #lateral label.chk.t-pueblerino{border-color:#5aa9ff66} #lateral label.chk.t-forastero{border-color:#4fd1c566}
+  #lateral label.chk.t-esbirro{border-color:#ff9f4366} #lateral label.chk.t-diablo{border-color:#ff5c6466}
+  #lateral label.chk:has(input:checked){background:#ffffff1c}
+  .tarjeta{border-radius:12px;padding:.8rem;background:var(--panel2);border:1px solid var(--borde);margin-bottom:.7rem}
+  .tarjeta .ic{font-size:2.2rem;line-height:1}
+  .tarjeta.mal{border-color:var(--sangre)} .tarjeta.bien{border-color:var(--musgo)}
+  .chip{display:inline-flex;gap:.25rem;align-items:center;background:#ffffff14;border-radius:999px;padding:.1rem .5rem;font-size:.78rem;margin:.1rem}
+  .chip button{background:none;border:0;padding:0 .15rem;color:var(--tenue)}
+  .aviso{color:#ffd166;font-size:.82rem;margin:.2rem 0}
+  .sala{border:1px solid var(--borde);border-radius:10px;padding:.4rem .5rem;margin:.35rem 0}
+  .sala.aqui{border-color:var(--musgo);background:#58c48e14}
+  .sala .fila{gap:.3rem;flex-wrap:wrap}
+  .chip.ocu{transition:background .15s,box-shadow .15s}
+  .chip.ocu.habla{background:#2f7a3a;box-shadow:0 0 0 2px #8dff7a;color:#fff}
+  .comp{padding-bottom:.4rem}
+  .comp .chip{font-size:.82rem;padding:.15rem .55rem}
+  tr.actual td{background:#f0b55026;font-weight:700}
+  .ok{color:var(--musgo)} .mal{color:var(--sangre)}
+  table.grim{width:100%;border-collapse:collapse;font-size:.85rem}
+  table.grim td,table.grim th{padding:.25rem .4rem;border-bottom:1px solid #ffffff14;text-align:left}
+
+  /* ── Modales ── */
+  #modal{position:fixed;inset:0;background:#05070dd0;display:grid;place-items:center;z-index:25}
+  #modal .caja{padding:1.4rem 1.6rem;max-width:min(94vw,520px);max-height:86vh;overflow:auto}
+  #modal h2{font-family:var(--titulo);margin:.1rem 0 .6rem}
+
+  @media (max-width:860px){
+    #juego{grid-template-columns:1fr;grid-template-rows:minmax(0,1fr) 44vh}
+    #lateral{margin:0 8px 8px}
+    #top{left:50%} #barra{left:50%;bottom:calc(44vh + 8px)} #toast{left:50%;bottom:calc(44vh + 70px)}
+    #log{top:56px}
+  }
+  @media (prefers-reduced-motion:reduce){ *{transition:none!important;animation:none!important} }
+</style>
+</head>
+<body>
+
+<div id="inicio">
+  <div class="caja">
+    <h1>Aldea de Sombras</h1>
+    <p>Un juego de deducción social: los jugadores se sientan en círculo, el Narrador dirige la partida y la voz de todos se oye por la mesa. Los buenos deben descubrir al Diablo antes de que sea tarde.</p>
+    <input id="nombre" placeholder="Tu nombre" maxlength="14" autocomplete="off" aria-label="Tu nombre">
+    <button id="btnCrear" class="primario">🎭 Crear sala (seré el Narrador)</button>
+    <div class="fila"><input id="codigo" placeholder="CÓDIGO" maxlength="4" autocomplete="off" aria-label="Código de sala"><button id="btnUnir">Sentarme a la mesa</button></div>
+    <div id="errorInicio" role="alert"></div>
+    <p>Necesitas permitir el micrófono para hablar. Por internet requiere HTTPS (en localhost funciona sin él).</p>
+  </div>
+</div>
+
+<div id="juego" hidden>
+  <div id="top" class="caja">
+    <span>Sala <span id="cod"></span></span>
+    <span id="fase"></span>
+    <span id="reloj"></span>
+    <button id="mic" title="Silenciar / activar micrófono">🎙️</button>
+  </div>
+  <div id="mesa">
+    <div id="circulo">
+      <div id="asientos"></div>
+      <div id="relojMesa"><div id="manecilla"></div><div id="eje"></div><div id="centroTxt"></div></div>
+    </div>
+  </div>
+  <aside id="lateral" class="caja" aria-live="polite"></aside>
+  <div id="log"></div>
+  <div id="barra" class="caja" hidden></div>
+  <div id="toast" hidden></div>
+</div>
+<div id="modal" hidden><div class="caja"></div></div>
+
+<script src="/cliente.js"></script>
+</body>
+</html>
