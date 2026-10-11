@@ -68,6 +68,8 @@ El Narrador ve la lista de roles que despiertan, **en orden**, y para cada uno p
 - Casos especiales automáticos: Santo ejecutado, Alcalde con 3 vivos sin ejecución, Canciller que hereda al Diablo. El Narrador puede desactivar el fin automático o terminar la partida a mano.
 
 ## Roles incluidos (`roles.js`)
+Todos pueden consultarlos con descripciones en el botón **📖 Roles** de la barra superior (también en la sala de espera y durante la partida).
+
 - **Pueblerinos:** Adivina, Alcalde, Amante, Bibliotecaria, Cazador, Investigador, Medium, Monje, Sepulturero, Soldado, Tabernero, Tejedora, Virgen.
 - **Forasteros:** Borracho, Mayordomo, Recluso, Santo.
 - **Esbirros:** Alquimista, Barón, Canciller, Espía.

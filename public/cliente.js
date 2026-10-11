@@ -510,9 +510,36 @@ function renderModal() {
 }
 $('#modal').addEventListener('click', e => { const b = e.target.closest('[data-act]'); if (b) ACT[b.dataset.act] && ACT[b.dataset.act](b.dataset, b); });
 
+// ═════════ libro de roles ═════════
+function momentoNoche(r) {
+  const d = r.noche; if (!d) return '';
+  if (d.alMorir) return '🌙 Si muere de noche';
+  if (d.primera && d.otras) return '🌙 Cada noche';
+  if (d.primera) return '🌙 Solo la primera noche';
+  return '🌙 Cada noche menos la primera';
+}
+function abrirLibro() {
+  const grupos = [['pueblerino', 'Pueblerinos', 'bando bueno · habilidades beneficiosas'], ['forastero', 'Forasteros', 'bando bueno · habilidades perjudiciales'],
+    ['esbirro', 'Esbirros', 'bando malo · ayudan al Diablo'], ['diablo', 'Diablos', 'bando malo · el villano principal']];
+  const cuerpo = grupos.map(([tp, tit, sub]) => {
+    const lista = Object.values(ROLES).filter(r => r.tipo === tp);
+    return `<div class="grupo" style="--c:${COLOR[tp]}"><span style="color:${COLOR[tp]}">${tit}</span> <small class="tenue">${lista.length} · ${sub}</small></div>` +
+      lista.map(r => `<div class="rolfila"><div class="ic">${r.icono}</div><div><b>${esc(r.nombre)}</b>${r.noche ? `<span class="tag">${momentoNoche(r)}</span>` : ''}<p>${esc(r.desc)}</p></div></div>`).join('');
+  }).join('');
+  $('#libro').firstElementChild.innerHTML = `<div class="cab"><div><h2>📖 Libro de roles</h2><small class="tenue">${Object.keys(ROLES).length} roles · Buenos: Pueblerinos y Forasteros · Malos: Esbirros y Diablos</small></div><button id="cerrarLibro" class="primario" aria-label="Cerrar">✕ Cerrar</button></div>${cuerpo}`;
+  $('#libro').hidden = false;
+  $('#cerrarLibro').onclick = cerrarLibro;
+  $('#libro').firstElementChild.scrollTop = 0;
+}
+function cerrarLibro() { $('#libro').hidden = true; }
+$('#btnRoles').onclick = abrirLibro;
+$('#libro').addEventListener('click', e => { if (e.target.id === 'libro') cerrarLibro(); });
+addEventListener('keydown', e => { if (e.key === 'Escape') cerrarLibro(); });
+
 // ═════════ acciones ═════════
 const draft = id => (borradores['info:' + id] || '').trim();
 const ACT = {
+  libro: () => abrirLibro(),
   // preparación
   sugerirRoles: () => enviar({ t: 'sugerirRoles' }),
   sortear: () => enviar({ t: 'sortear' }),

@@ -132,6 +132,19 @@
   #modal .caja{padding:1.4rem 1.6rem;max-width:min(94vw,520px);max-height:86vh;overflow:auto}
   #modal h2{font-family:var(--titulo);margin:.1rem 0 .6rem}
 
+  /* ── Libro de roles ── */
+  #libro{position:fixed;inset:0;background:#05070dd9;display:grid;place-items:center;z-index:28;padding:.6rem}
+  #libro .caja{width:min(94vw,680px);max-height:90vh;overflow:auto;padding:1.1rem 1.3rem}
+  #libro h2{font-family:var(--titulo);margin:.1rem 0 .2rem}
+  #libro .cab{display:flex;justify-content:space-between;align-items:flex-start;gap:1rem;position:sticky;top:-1.1rem;background:var(--panel);padding:.2rem 0 .5rem;z-index:1}
+  #libro .grupo{font-family:var(--titulo);font-size:1.05rem;margin:1rem 0 .2rem;padding-bottom:.25rem;border-bottom:2px solid var(--c)}
+  #libro .grupo small{font-family:var(--ui);margin-left:.4rem}
+  .rolfila{display:grid;grid-template-columns:2.4rem 1fr;gap:.7rem;padding:.6rem 0;border-top:1px solid #ffffff14}
+  .rolfila:first-of-type{border-top:0}
+  .rolfila .ic{font-size:1.8rem;line-height:1.1;text-align:center}
+  .rolfila b{font-size:1rem}
+  .rolfila p{margin:.15rem 0 0;font-size:.9rem;line-height:1.45}
+  .rolfila .tag{display:inline-block;font-size:.72rem;border:1px solid #ffffff2e;border-radius:999px;padding:.02rem .5rem;margin-left:.4rem;color:var(--tenue);vertical-align:middle}
   @media (max-width:860px){
     #juego{grid-template-columns:1fr;grid-template-rows:minmax(0,1fr) 44vh}
     #lateral{margin:0 8px 8px}
@@ -160,6 +173,7 @@
     <span>Sala <span id="cod"></span></span>
     <span id="fase"></span>
     <span id="reloj"></span>
+    <button id="btnRoles" title="Ver todos los roles y sus habilidades">📖 Roles</button>
     <button id="mic" title="Silenciar / activar micrófono">🎙️</button>
   </div>
   <div id="mesa">
@@ -174,6 +188,7 @@
   <div id="toast" hidden></div>
 </div>
 <div id="modal" hidden><div class="caja"></div></div>
+<div id="libro" hidden role="dialog" aria-label="Libro de roles"><div class="caja"></div></div>
 
 <script src="/cliente.js"></script>
 </body>
