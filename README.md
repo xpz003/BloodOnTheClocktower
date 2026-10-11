@@ -43,6 +43,16 @@ Los jugadores ven siempre cuántos roles hay de cada tipo (Pueblerinos, Foraster
 - Durante las nominaciones las salas se pausan y todos se oyen (el Narrador puede mantenerlas activas en Ajustes).
 - El Narrador puede crear, renombrar y borrar salas, mover a cualquiera, cerrar las salas privadas, silenciar a los jugadores y usar **📢 Hablar a todos**. También puede entrar en una sala para escuchar.
 
+## Moderación y reglas especiales
+- **Cazador:** el jugador lo anuncia en voz alta; no tiene botón. El Narrador selecciona su asiento, elige al objetivo y decide: *Matar al objetivo* o *Sin efecto*. Se marca solo la ficha "Habilidad usada".
+- **Silenciar:** el Narrador puede silenciar a un jugador, a todos, o activar "Al nominar, silenciar a todos menos al nominado" (dura mientras haya defensa y votación). **Todos ven quién está silenciado** (🔇 en el asiento, en las salas y en el panel).
+- **Echar:** el Narrador puede expulsar a cualquier jugador desde su asiento.
+- **Nombres:** no se permiten nombres repetidos en una sala (sin distinguir mayúsculas ni tildes).
+- **Límite por sala:** el Narrador fija el máximo de personas de cada sala de voz (👥). El Narrador puede mover a alguien aunque esté llena.
+- **Barón:** los jugadores ven siempre los números **originales** de la tabla, para no delatar que hay un Barón.
+- **Espía:** ve el Grimorio como una **captura temporal** (por defecto 15 s, configurable) que se cierra sola y no puede volver a abrir.
+- **Nominaciones:** no se puede nominar a uno mismo.
+
 ## Qué ve cada uno
 - **Narrador:** el círculo con el rol de todos, las fichas puestas, quién está despierto, y el Grimorio con el registro de todo.
 - **Jugadores:** su propio rol; el resto de fichas, tapadas. Las acciones del Narrador son invisibles para ellos.

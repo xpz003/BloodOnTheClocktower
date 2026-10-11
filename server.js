@@ -38,7 +38,30 @@ const momento = room => room.fase === 'noche' ? `Noche ${room.n}` : room.fase ==
 const limpiar = (t, n) => String(t || '').replace(/[<>&"]/g, '').trim().slice(0, n);
 // Las salas privadas funcionan de día y, durante las nominaciones, solo si el Narrador lo permite
 const salasActivas = room => room.fase === 'noche' ? false : ['nominaciones', 'defensa', 'votando'].includes(room.fase) ? room.ajustes.salasNom : true;
+const claveNombre = t => String(t).normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/\s+/g, ' ').trim();
+const ocupacion = (room, id) => todos(room).filter(p => !p.off && p.sala === id).length; // incluye al Narrador si está dentro
+// Jugadores que no pueden hablar: los silenciados a mano, todos si hay silencio general,
+// y (si el Narrador lo activa) todos menos el nominado mientras dura la nominación.
+function silenciadosDe(room) {
+  const set = new Set(room.silenciados);
+  if (room.silencio) jugadores(room).forEach(p => set.add(p.id));
+  const a = room.nominacionActual;
+  if (room.ajustes.soloNominado && a && ['defensa', 'votando'].includes(room.fase)) jugadores(room).forEach(p => { if (p.id !== a.a) set.add(p.id); });
+  return [...set];
+}
 const registrar = (room, texto) => { room.eventos.push(`${momento(room)}: ${texto}`); if (room.eventos.length > 150) room.eventos.shift(); };
+
+// Un jugador sale de la sala (se desconecta o lo echa el Narrador)
+function quitar(room, p, motivo) {
+  if (p.quitado) return;
+  p.quitado = true;
+  if (room.fase === 'lobby') { room.players.delete(p.id); room.asientos = room.asientos.filter(i => i !== p.id); }
+  else { p.off = true; p.ws = null; p.mano = false; }
+  if (p.habla) { p.habla = false; bcast(room, { t: 'habla', id: p.id, on: false }); }
+  room.silenciados.delete(p.id);
+  anunciar(room, motivo || `🚪 ${p.nombre} se ha ido.`);
+  enviarEstado(room);
+}
 
 function nuevoCodigo() {
   const L = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
@@ -115,7 +138,7 @@ function grimorio(room) {
     rolesElegidos: room.rolesElegidos, enJuego: rolesEnJuego(room), fichasDisp: fichasDisponibles(room),
     lista: room.fase === 'noche' ? listaNoche(room) : [],
     despiertos: [...room.despiertos], elecciones: room.elecciones,
-    virgen: room.pendienteVirgen, cazador: room.pendienteCazador, bluffs: room.bluffs,
+    virgen: room.pendienteVirgen, bluffs: room.bluffs, silenciados: [...room.silenciados],
     eventos: room.eventos.slice(-60)
   };
 }
@@ -123,12 +146,13 @@ function grimorio(room) {
 function estado(room, para) {
   const nar = para.id === room.narrador, fin = room.fase === 'fin';
   const n = narradorDe(room), v = room.voto;
+  const sil = silenciadosDe(room);
   const out = {
     t: 'estado', ahora: Date.now(), fase: room.fase, n: room.n, dia: room.dia, deadline: room.deadline,
     narrador: { id: n.id, nombre: n.nombre, sala: n.sala }, yo: { id: para.id, nar, despierto: room.despiertos.has(para.id) },
-    ajustes: room.ajustes, silencio: room.silencio, asientos: room.asientos.slice(),
+    ajustes: room.ajustes, silencio: room.silencio, silenciados: sil, asientos: room.asientos.slice(),
     salas: room.salas, salasActivas: salasActivas(room), megafono: room.megafono, composicion: room.composicion,
-    hablando: room.fase === 'noche' ? [] : todos(room).filter(p => p.habla && !p.off).map(p => p.id),
+    hablando: room.fase === 'noche' ? [] : todos(room).filter(p => p.habla && !p.off && !sil.includes(p.id)).map(p => p.id),
     jugadores: jugadores(room).map(p => ({
       id: p.id, nombre: p.nombre, vivo: p.vivo, off: p.off, mano: p.mano, votoFantasma: p.votoFantasma, sala: p.sala,
       rol: nar || fin ? p.rol || undefined : (p.id === para.id && p.rol && room.fase !== 'lobby' ? vista(p) : undefined),
@@ -213,6 +237,8 @@ function iniciar(room) {
   ps.forEach(p => { p.vivo = true; p.mano = false; p.votoFantasma = true; });
   room.composicion = { pueblerino: 0, forastero: 0, esbirro: 0, diablo: 0 };
   ps.forEach(p => room.composicion[tipo(p)]++);
+  // Con Barón en juego se muestran los números ORIGINALES (se devuelven 2 Pueblerinos por 2 Forasteros) para no delatarlo
+  if (ps.some(p => p.rol === 'baron') && room.composicion.forastero >= 2) { room.composicion.forastero -= 2; room.composicion.pueblerino += 2; }
   room.n = 0; room.dia = 0; room.ganador = null; room.motivo = '';
   room.eventos = [];
   registrar(room, 'Comienza la partida.');
@@ -223,7 +249,7 @@ function empezarNoche(room) {
   room.n++;
   room.despiertos.clear(); room.hechos.clear(); room.elecciones = {};
   room.nominaciones = []; room.nominadores.clear(); room.nominados.clear(); room.bloque = null;
-  room.nominacionActual = null; room.voto = null; room.pendienteVirgen = null; room.pendienteCazador = null;
+  room.nominacionActual = null; room.voto = null; room.pendienteVirgen = null;
   jugadores(room).forEach(p => { p.mano = false; p.fichas = p.fichas.filter(f => f !== 'emborrachado'); });
   todos(room).forEach(p => { p.habla = false; });
   setFase(room, 'noche', 0);
@@ -400,10 +426,10 @@ wss.on('connection', ws => {
           deadline: 0, timer: null, ganador: null, motivo: '', eventos: [], silencio: false,
           rolesElegidos: [], despiertos: new Set(), hechos: new Set(), elecciones: {},
           nominaciones: [], nominadores: new Set(), nominados: new Set(), bloque: null, nominacionActual: null, numNom: 0,
-          voto: null, pendienteVirgen: null, pendienteCazador: null, ejecutadoHoy: null, santoEjecutado: false, bluffs: null,
+          voto: null, pendienteVirgen: null, silenciados: new Set(), ejecutadoHoy: null, santoEjecutado: false, bluffs: null,
           salas: [{ id: 'plaza', nombre: 'Plaza' }, { id: 's1', nombre: 'Taberna' }, { id: 's2', nombre: 'Biblioteca' }, { id: 's3', nombre: 'Cripta' }, { id: 's4', nombre: 'Herrería' }],
           numSala: 4, megafono: false, composicion: null,
-          ajustes: { charla: 180, defensa: 30, paso: 4, umbral: 'mas1', finAuto: true, salasAbiertas: true, salasNom: false }
+          ajustes: { charla: 180, defensa: 30, paso: 4, umbral: 'mas1', finAuto: true, salasAbiertas: true, salasNom: false, soloNominado: false, espiaSeg: 15 }
         };
         rooms.set(room.code, room);
       } else {
@@ -411,6 +437,7 @@ wss.on('connection', ws => {
         if (!room) return err(ws, 'Esa sala no existe.'), (room = null);
         if (room.fase !== 'lobby') return err(ws, 'La partida ya ha empezado.'), (room = null);
         if (room.asientos.length >= MAX_JUGADORES) return err(ws, 'La sala está llena.'), (room = null);
+        if (todos(room).some(q => claveNombre(q.nombre) === claveNombre(nombre))) return err(ws, `El nombre "${nombre}" ya está en uso en esta sala. Elige otro.`), (room = null);
       }
       player = { id: nextId++, nombre, vivo: true, rol: null, cree: null, fichas: [], votoFantasma: true, mano: false, off: false, sala: 'plaza', habla: false, ws };
       room.players.set(player.id, player);
@@ -434,12 +461,13 @@ wss.on('connection', ws => {
         const s = room.salas.find(x => x.id === m.sala);
         if (!s) return;
         if (s.id !== 'plaza' && !room.ajustes.salasAbiertas && !esNar) return err(ws, 'El Narrador ha cerrado las salas privadas.');
+        if (!esNar && s.id !== 'plaza' && s.max > 0 && player.sala !== s.id && ocupacion(room, s.id) >= s.max) return err(ws, `La sala "${s.nombre}" está llena (máximo ${s.max}).`);
         player.sala = s.id; enviarEstado(room);
         return;
       }
       case 'habla': { // indicador de "está hablando": lo ven todos, también los que no oyen
         if (room.fase === 'noche') return;
-        const on = !!m.on;
+        const on = !!m.on && !silenciadosDe(room).includes(player.id);
         if (player.habla === on) return;
         player.habla = on; bcast(room, { t: 'habla', id: player.id, on });
         return;
@@ -468,6 +496,7 @@ wss.on('connection', ws => {
         if (esNar || room.fase !== 'nominaciones') return err(ws, 'Ahora no se puede nominar.');
         if (!player.vivo) return err(ws, 'Los muertos no pueden nominar.');
         if (room.nominadores.has(player.id)) return err(ws, 'Ya has nominado hoy.');
+        if (t && t.id === player.id) return err(ws, 'No puedes nominarte a ti mismo.');
         if (!t || !t.vivo) return err(ws, 'Elige a un jugador vivo.');
         if (room.nominados.has(t.id)) return err(ws, `${t.nombre} ya ha sido nominado hoy.`);
         nominar(room, player, t);
@@ -477,18 +506,6 @@ wss.on('connection', ws => {
         if (esNar || room.fase !== 'votando') return;
         if (!player.vivo && !player.votoFantasma) return;
         player.mano = !!m.alzada;
-        enviarEstado(room);
-        return;
-      }
-      case 'cazar': {
-        const t = jug(m.target);
-        if (esNar || !['dia', 'nominaciones'].includes(room.fase) || vista(player) !== 'cazador' || !player.vivo) return;
-        if (tiene(player, 'habilidad_usada') || !t) return err(ws, 'No puedes usar esa habilidad.');
-        player.fichas.push('habilidad_usada');
-        anunciar(room, `🏹 ${player.nombre} dice ser el Cazador y dispara a ${t.nombre}.`);
-        room.pendienteCazador = { cazador: player.id, objetivo: t.id, nombre: player.nombre, objetivoNombre: t.nombre, esDiablo: tipo(t) === 'diablo', emborrachado: tiene(player, 'emborrachado') || player.rol !== 'cazador' };
-        registrar(room, `${player.nombre} (Cazador) dispara a ${t.nombre}.`);
-        aviso(room, `🏹 Disparo del Cazador: resuélvelo en el panel.`);
         enviarEstado(room);
         return;
       }
@@ -508,6 +525,8 @@ wss.on('connection', ws => {
         if (m.umbral === 'mas1' || m.umbral === 'mitad') a.umbral = m.umbral;
         if (m.finAuto !== undefined) a.finAuto = !!m.finAuto;
         if (m.salasNom !== undefined) a.salasNom = !!m.salasNom;
+        if (m.soloNominado !== undefined) a.soloNominado = !!m.soloNominado;
+        if (m.espiaSeg !== undefined) a.espiaSeg = num(m.espiaSeg, 3, 60, a.espiaSeg);
         if (m.salasAbiertas !== undefined) { a.salasAbiertas = !!m.salasAbiertas; if (!a.salasAbiertas) todos(room).forEach(p => { p.sala = 'plaza'; }); }
         enviarEstado(room);
         return;
@@ -531,6 +550,11 @@ wss.on('connection', ws => {
       case 'moverJugador': {
         const p = jug(m.id), sa = room.salas.find(x => x.id === m.sala);
         if (p && sa) { p.sala = sa.id; enviarEstado(room); }
+        return;
+      }
+      case 'salaLimite': {
+        const sa = room.salas.find(x => x.id === m.id);
+        if (sa && sa.id !== 'plaza') { sa.max = num(m.max, 0, 15, 0); enviarEstado(room); }
         return;
       }
       case 'megafono': room.megafono = !!m.on; enviarEstado(room); return;
@@ -616,18 +640,16 @@ wss.on('connection', ws => {
         } else iniciarDefensa(room);
         return;
       }
-      case 'cazador': {
-        const pc = room.pendienteCazador;
-        if (!pc) return;
-        room.pendienteCazador = null;
-        const t = jug(pc.objetivo);
-        if (m.matar && t && t.vivo) {
+      case 'disparo': { // El Cazador lo anuncia en voz alta; el Narrador ejecuta la acción
+        const c = jug(m.id), t = jug(m.objetivo);
+        if (!c || !t || !['dia', 'nominaciones', 'defensa', 'votando'].includes(room.fase)) return;
+        if (!tiene(c, 'habilidad_usada')) c.fichas.push('habilidad_usada');
+        if (m.matar && t.vivo) {
           morir(room, t);
-          anunciar(room, `💥 ${t.nombre} cae muerto por el disparo.`);
-          registrar(room, `El disparo del Cazador mata a ${t.nombre}.`);
-          comprobarFin(room, false);
-        } else anunciar(room, `🏹 El disparo no tiene efecto.`);
-        enviarEstado(room);
+          anunciar(room, `💀 ${t.nombre} ha muerto.`);
+          registrar(room, `El disparo de ${c.nombre} (Cazador) mata a ${t.nombre}.`);
+          if (!comprobarFin(room, false)) enviarEstado(room);
+        } else { registrar(room, `El disparo de ${c.nombre} (Cazador) a ${t.nombre} no tiene efecto.`); enviarEstado(room); }
         return;
       }
       case 'ejecutar': {
@@ -638,6 +660,21 @@ wss.on('connection', ws => {
         return;
       }
       case 'silencio': room.silencio = !!m.on; enviarEstado(room); return;
+      case 'silenciar': {
+        const p = jug(m.id);
+        if (!p) return;
+        if (m.on) room.silenciados.add(p.id); else room.silenciados.delete(p.id);
+        enviarEstado(room); return;
+      }
+      case 'expulsar': {
+        const p = jug(m.id);
+        if (!p) return;
+        const w = p.ws;
+        send(w, { t: 'expulsado', texto: 'El Narrador te ha echado de la sala.' });
+        quitar(room, p, `🚪 ${p.nombre} ha sido expulsado.`);
+        if (w && w.close) w.close();
+        return;
+      }
 
       // ── asientos y fichas ──
       case 'matar': case 'revivir': {
@@ -713,8 +750,8 @@ wss.on('connection', ws => {
       case 'grimorioEspia': {
         const p = jug(m.id);
         if (!p) return;
-        send(p.ws, { t: 'grimorioEspia', filas: jugadores(room).map(q => ({ nombre: q.nombre, rol: ROLES[q.rol].nombre + ' ' + ROLES[q.rol].icono, cree: q.cree ? ROLES[q.cree].nombre : null, vivo: q.vivo, fichas: q.fichas.map(f => FICHAS[f].icono + ' ' + FICHAS[f].nombre) })) });
-        aviso(room, `🕵️ Grimorio mostrado a ${p.nombre}.`);
+        send(p.ws, { t: 'grimorioEspia', seg: room.ajustes.espiaSeg, filas: jugadores(room).map(q => ({ nombre: q.nombre, rol: ROLES[q.rol].nombre + ' ' + ROLES[q.rol].icono, cree: q.cree ? ROLES[q.cree].nombre : null, vivo: q.vivo, fichas: q.fichas.map(f => FICHAS[f].icono + ' ' + FICHAS[f].nombre) })) });
+        aviso(room, `🕵️ Captura del Grimorio mostrada a ${p.nombre} durante ${room.ajustes.espiaSeg} s.`);
         return;
       }
       case 'aliados': { // el equipo malvado se conoce (primera noche)
@@ -753,6 +790,7 @@ wss.on('connection', ws => {
         clearTimeout(room.timer);
         for (const [id, p] of room.players) if (p.off) { room.players.delete(id); room.asientos = room.asientos.filter(x => x !== id); }
         jugadores(room).forEach(p => { p.vivo = true; p.rol = null; p.cree = null; p.fichas = []; p.mano = false; p.votoFantasma = true; });
+        room.silenciados.clear(); room.silencio = false;
         Object.assign(room, { composicion: null, megafono: false, n: 0, dia: 0, ganador: null, motivo: '', voto: null, nominaciones: [], bloque: null, nominacionActual: null, bluffs: null, elecciones: {} });
         room.despiertos.clear(); room.hechos.clear(); room.nominadores.clear(); room.nominados.clear();
         setFase(room, 'lobby', 0);
@@ -768,10 +806,7 @@ wss.on('connection', ws => {
       clearTimeout(room.timer); rooms.delete(room.code);
       return;
     }
-    if (room.fase === 'lobby') { room.players.delete(player.id); room.asientos = room.asientos.filter(i => i !== player.id); }
-    else { player.off = true; player.ws = null; player.mano = false; if (player.habla) { player.habla = false; bcast(room, { t: 'habla', id: player.id, on: false }); } }
-    anunciar(room, `🚪 ${player.nombre} se ha ido.`);
-    enviarEstado(room);
+    quitar(room, player);
   });
 });
 

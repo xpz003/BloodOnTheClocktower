@@ -5,8 +5,8 @@ const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;'
 // ═════════ estado del cliente ═════════
 let ws, yo = null, S = null, ROLES = {}, FICHAS = {}, DIST = {}, MIN = 3, soyNar = false;
 let sel = null, armada = null, elegidos = [], despertar = null, eleccionEnviada = false;
-let infos = [], borradores = {}, abiertos = new Set(['asiento', 'fichas', 'noche']), silenciado = false, cazadorUsado = false;
-let espia = null, angMan = 0, yoHabla = false, ultimoVoz = 0;
+let infos = [], borradores = {}, abiertos = new Set(['asiento', 'fichas', 'noche']), silenciado = false;
+let espia = null, espiaHasta = 0, angMan = 0, yoHabla = false, ultimoVoz = 0;
 let hablandoSet = new Set();
 const peers = new Map();
 let audioCtx, micStream = null, micTrack = null, localAn = null, localBuf = null;
@@ -70,10 +70,11 @@ function alMensaje(m) {
     case 'msg': log(m.texto, m.privado); break;
     case 'info': infos.unshift({ momento: m.momento, texto: m.texto }); log('✉️ ' + m.texto, true); toast('✉️ El Narrador te ha enviado información'); render(); break;
     case 'despertar': despertar = m; elegidos = []; eleccionEnviada = false; toast('🌙 El Narrador te ha despertado'); aplicarMic(); render(); break;
-    case 'dormir': despertar = null; elegidos = []; eleccionEnviada = false; aplicarMic(); render(); break;
+    case 'dormir': espia = null; despertar = null; elegidos = []; eleccionEnviada = false; aplicarMic(); render(); break;
     case 'ack': eleccionEnviada = true; toast('✔ Elección enviada'); render(); break;
     case 'sugerencia': borradores['info:' + m.id] = m.texto; render(); break;
-    case 'grimorioEspia': espia = m.filas; render(); break;
+    case 'grimorioEspia': espia = m.filas; espiaHasta = Date.now() + (m.seg || 15) * 1000; render(); break;
+    case 'expulsado': alert(m.texto); location.hash = ''; location.reload(); break;
     case 'habla': if (m.on) hablandoSet.add(m.id); else hablandoSet.delete(m.id); pintarHabla(); break;
     case 'rtc': señal(m.from, m.data); break;
     case 'cerrada': alert(m.texto); location.hash = ''; location.reload(); break;
@@ -88,8 +89,8 @@ function alEstado(m) {
   if (!prev || prev.fase !== m.fase) {
     elegidos = []; armada = null; yoHabla = false;
     if (m.fase !== 'noche') { despertar = null; eleccionEnviada = false; }
-    if (m.fase === 'lobby') { infos = []; cazadorUsado = false; }
-    if (m.fase === 'fin' && soyNar) espia = null;
+    if (m.fase === 'lobby') infos = [];
+    espia = null; // la captura del Grimorio no sobrevive a un cambio de fase
   }
   if (!m.yo.despierto && despertar && m.fase === 'noche') { /* el Narrador aún no lo ha dormido */ }
   gestionarPeers(); aplicarMic(); actualizarEmision(); render();
@@ -145,7 +146,7 @@ function renderMesa() {
     const marcas = [];
     if (p.mano) marcas.push('✋'); if (!p.vivo && p.votoFantasma) marcas.push('🗳️');
     if (S.bloque && S.bloque.id === p.id) marcas.push(S.bloque.empate ? '⚖️❓' : '⚖️');
-    const izq = []; if (p.off) izq.push('📴'); if (awake.includes(p.id)) izq.push('🌙');
+    const izq = []; if (S.silenciados.includes(p.id)) izq.push('🔇'); if (p.off) izq.push('📴'); if (awake.includes(p.id)) izq.push('🌙');
     const fp = soyNar && p.fichas ? p.fichas.filter(f => f !== 'muerto' || p.vivo).map(f => `<span title="${esc(FICHAS[f].nombre)}">${FICHAS[f].icono}</span>`).join('') : '';
     const sub = soyNar && p.rol ? `${esc(ROLES[p.rol].nombre)}${p.cree ? ' · cree ' + esc(ROLES[p.cree].nombre) : ''}` : (S.fase === 'fin' && p.rol ? esc(ROLES[p.rol].nombre) : '');
     return `<div class="${cls.join(' ')}" data-id="${p.id}" tabindex="0" role="button" aria-label="${esc(p.nombre)}" style="--d:${d}px;left:${x}px;top:${y}px">
@@ -225,18 +226,18 @@ const btn = (act, txt, data = '', cls = '') => `<button class="${cls}" data-act=
 // ═════ composición de la partida y salas de voz ═════
 const PLURAL = { pueblerino: ['Pueblerino', 'Pueblerinos'], forastero: ['Forastero', 'Forasteros'], esbirro: ['Esbirro', 'Esbirros'], diablo: ['Diablo', 'Diablos'] };
 const COLOR = { pueblerino: '#5aa9ff', forastero: '#4fd1c5', esbirro: '#ff9f43', diablo: '#ff5c64' };
-function tablaDist(n) {
+function tablaDist(n, conNota) {
   const filas = Object.keys(DIST).map(k => { const d = DIST[k]; return `<tr class="${+k === n ? 'actual' : ''}"><td><b>${k}</b></td><td>${d[0]}</td><td>${d[1]}</td><td>${d[2]}</td><td>${d[3]}</td></tr>`; }).join('');
-  return `<table class="grim"><tr><th>Jugadores</th><th>Pueblerinos</th><th>Forasteros</th><th>Esbirros</th><th>Diablo</th></tr>${filas}</table><small>Si hay Barón en juego: 2 Pueblerinos menos y 2 Forasteros más.</small>`;
+  return `<table class="grim"><tr><th>Jugadores</th><th>Pueblerinos</th><th>Forasteros</th><th>Esbirros</th><th>Diablo</th></tr>${filas}</table>${conNota ? '<small>Si hay Barón en juego: 2 Pueblerinos menos y 2 Forasteros más (los jugadores ven siempre los números originales).</small>' : ''}`;
 }
 function htmlComposicion() {
   const n = S.asientos.length;
   let c = S.composicion, tit;
   if (c) tit = `En esta partida (${n} jugadores) hay`;
-  else if (n < MIN) return `<div class="comp"><div class="aviso">👥 Hacen falta al menos <b>${MIN} jugadores</b> (sin contar al Narrador). Ahora hay ${n}.</div>${det('tabla', '📋 Tabla de jugadores', tablaDist(n))}</div>`;
+  else if (n < MIN) return `<div class="comp"><div class="aviso">👥 Hacen falta al menos <b>${MIN} jugadores</b> (sin contar al Narrador). Ahora hay ${n}.</div>${det('tabla', '📋 Tabla de jugadores', tablaDist(n, soyNar))}</div>`;
   else { const d = DIST[Math.min(15, n)]; c = { pueblerino: d[0], forastero: d[1], esbirro: d[2], diablo: d[3] }; tit = `Con ${n} jugadores se juega con`; }
   const chips = Object.keys(PLURAL).map(tp => `<span class="chip" style="border:1px solid ${COLOR[tp]}88"><b style="color:${COLOR[tp]}">${c[tp]}</b> ${PLURAL[tp][c[tp] === 1 ? 0 : 1]}</span>`).join('');
-  const tabla = tablaDist(n);
+  const tabla = tablaDist(n, soyNar);
   return `<div class="comp"><small>${tit}</small><div>${chips}</div>${det('tabla', '📋 Tabla de jugadores', tabla)}</div>`;
 }
 
@@ -253,14 +254,19 @@ function htmlSalas() {
   if (noche) h += '<div class="aviso">🌙 De noche nadie habla: solo el Narrador con quien despierta.</div>';
   else if (!S.salasActivas) h += '<div class="aviso">📣 Salas en pausa: ahora todos se oyen.</div>';
   if (S.megafono && !noche) h += '<div class="aviso">📢 El Narrador está hablando a todos.</div>';
-  if (S.silencio && !noche) h += '<div class="aviso">🤫 Silencio: solo habla el Narrador.</div>';
+  if (!noche) {
+    const todosMudos = S.jugadores.length && S.jugadores.every(q => S.silenciados.includes(q.id));
+    if (S.silencio || todosMudos) h += '<div class="aviso">🤫 Silencio: solo habla el Narrador.</div>';
+    else if (S.silenciados.length) h += `<div class="aviso">🔇 Silenciados: ${S.silenciados.map(i => esc(nom(i))).join(', ')}</div>`;
+    if (S.ajustes.soloNominado && S.actual && ['defensa', 'votando'].includes(S.fase)) h += `<div class="aviso">🗣️ Solo habla el nominado (${esc(nom(S.actual.a))}).</div>`;
+  }
   h += S.salas.map(sa => {
-    const oc = ocupantes(sa.id), aqui = yoSala === sa.id;
+    const oc = ocupantes(sa.id), aqui = yoSala === sa.id, max = sa.max || 0, llena = max > 0 && oc.length >= max;
     const bloq = noche || (sa.id !== 'plaza' && !S.ajustes.salasAbiertas && !soyNar);
-    return `<div class="sala ${aqui ? 'aqui' : ''}"><div class="fila"><b>${sa.id === 'plaza' ? '🏛️' : '🔊'} ${esc(sa.nombre)}</b> <small>(${oc.length})</small><span style="flex:1"></span>
-      ${aqui ? '<small class="ok">✔ estás aquí</small>' : btn('unirSala', 'Entrar', `data-id="${sa.id}" ${bloq ? 'disabled' : ''}`, 'mini')}
-      ${soyNar && sa.id !== 'plaza' ? btn('salaRen', '✏️', `data-id="${sa.id}" title="Renombrar"`, 'mini') + btn('salaBorrar', '🗑️', `data-id="${sa.id}" title="Borrar sala"`, 'mini') : ''}</div>
-      <div>${oc.map(o => `<span class="chip ocu" data-hab="${o.id}">${o.nar ? '🎭' : '🎙️'} ${esc(o.nombre)}${o.id === yo ? ' (tú)' : ''}${o.vivo === false ? ' 💀' : ''}</span>`).join('') || '<small>vacía</small>'}</div></div>`;
+    return `<div class="sala ${aqui ? 'aqui' : ''}"><div class="fila"><b>${sa.id === 'plaza' ? '🏛️' : '🔊'} ${esc(sa.nombre)}</b> <small>(${oc.length}${max ? '/' + max : ''})</small><span style="flex:1"></span>
+      ${aqui ? '<small class="ok">✔ estás aquí</small>' : btn('unirSala', llena && !soyNar ? 'Llena' : 'Entrar', `data-id="${sa.id}" ${bloq || (llena && !soyNar) ? 'disabled' : ''}`, 'mini')}
+      ${soyNar && sa.id !== 'plaza' ? btn('salaLimite', '👥', `data-id="${sa.id}" title="Máximo de personas"`, 'mini') + btn('salaRen', '✏️', `data-id="${sa.id}" title="Renombrar"`, 'mini') + btn('salaBorrar', '🗑️', `data-id="${sa.id}" title="Borrar sala"`, 'mini') : ''}</div>
+      <div>${oc.map(o => `<span class="chip ocu" data-hab="${o.id}">${o.nar ? '🎭' : '🎙️'} ${esc(o.nombre)}${o.id === yo ? ' (tú)' : ''}${o.vivo === false ? ' 💀' : ''}${!o.nar && S.silenciados.includes(o.id) ? ' 🔇' : ''}</span>`).join('') || '<small>vacía</small>'}</div></div>`;
   }).join('');
   if (soyNar) h += `<div class="btns">${btn('salaCrear', '➕ Nueva sala')}${btn('megafono', S.megafono ? '📢 Hablar a todos: SÍ' : '📢 Hablar a todos: NO', '', S.megafono ? 'on' : '')}</div>`;
   h += '<small>Aunque no oigas una sala, ves quién está hablando en ella.</small>';
@@ -307,11 +313,6 @@ function htmlPreparacion(G) {
 
 function htmlFase(G) {
   let h = '';
-  const cz = G.cazador;
-  if (cz) {
-    h += `<div class="it"><b>🏹 Disparo del Cazador</b><br>${esc(cz.nombre)} dispara a <b>${esc(cz.objetivoNombre)}</b>. ${cz.esDiablo ? '<span class="ok">Es el Diablo.</span>' : '<span class="tenue">No es el Diablo.</span>'}${cz.emborrachado ? '<br><span class="aviso">⚠️ El Cazador está borracho: su habilidad falla.</span>' : ''}
-      <div class="btns">${btn('cazador', '💥 Matar', 'data-v="1"', 'peligro')}${btn('cazador', 'No pasa nada', 'data-v="0"')}</div></div>`;
-  }
   switch (S.fase) {
     case 'noche': {
       const lista = G.lista;
@@ -414,7 +415,20 @@ function htmlAsiento(G) {
     if (p.vivo && ['dia', 'nominaciones'].includes(S.fase)) h += btn('ejecutar', '⚖️ Ejecutar', '', 'peligro');
     h += btn('susurro', '🗣️ Mensaje privado');
   }
+  const mudo = G.silenciados.includes(p.id);
+  h += btn('silenciar', mudo ? '🔊 Dejar hablar' : '🔇 Silenciar', `data-v="${mudo ? 0 : 1}"`) + btn('expulsar', '🚪 Echar', '', 'peligro');
   h += '</div>';
+  if (!mudo && S.silenciados.includes(p.id)) h += '<small class="aviso">Ahora está silenciado por el silencio general o por la nominación.</small>';
+  const vc = p.cree || p.rol;
+  if (p.vivo && vc === 'cazador' && ['dia', 'nominaciones', 'defensa', 'votando'].includes(S.fase)) {
+    const objs = S.jugadores.filter(q => q.vivo && q.id !== p.id);
+    const so = objs.some(q => q.id === +borradores.cazObj) ? +borradores.cazObj : (objs[0] && objs[0].id), t = pj(so);
+    h += `<div class="it"><b>🏹 Disparo del Cazador</b><br><small>Lo anuncia él en voz alta; tú decides qué ocurre.</small>
+      ${tiene(p, 'habilidad_usada') ? '<br><span class="aviso">⚠️ Ya ha usado su habilidad.</span>' : ''}${p.rol !== 'cazador' ? '<br><span class="aviso">⚠️ Es el Borracho: su disparo no tiene efecto.</span>' : ''}
+      <div class="btns"><select data-chg="cazObj">${objs.map(q => `<option value="${q.id}" ${q.id === so ? 'selected' : ''}>${esc(q.nombre)}</option>`).join('')}</select></div>
+      ${t && t.rol ? `<small>${ROLES[t.rol].tipo === 'diablo' ? '<span class="ok">Es el Diablo.</span>' : 'No es el Diablo.'}</small>` : ''}
+      <div class="btns">${btn('disparo', '💥 Matar al objetivo', `data-id="${p.id}" data-o="${so}" data-v="1"`, 'peligro')}${btn('disparo', '🏹 Sin efecto', `data-id="${p.id}" data-o="${so}" data-v="0"`)}</div></div>`;
+  }
   if (S.fase !== 'lobby') {
     h += `<div>${(p.fichas || []).length ? p.fichas.map(f => `<span class="chip" title="${esc(FICHAS[f].nombre)}">${FICHAS[f].icono} ${esc(FICHAS[f].nombre)}<button data-act="quitarFicha" data-v="${f}" aria-label="Quitar">✕</button></span>`).join('') : '<small>Sin fichas.</small>'}</div>
       <div class="btns">${G.fichasDisp.map(f => btn('ponerFicha', `${FICHAS[f].icono}`, `data-v="${f}" title="Poner: ${esc(FICHAS[f].nombre)}"`, 'mini')).join('')}</div>`;
@@ -444,7 +458,9 @@ function htmlAjustes() {
       <select data-chg="ajuste" data-k="umbral"><option value="mas1" ${a.umbral === 'mas1' ? 'selected' : ''}>mitad de vivos + 1</option><option value="mitad" ${a.umbral === 'mitad' ? 'selected' : ''}>la mitad de vivos (redondeo arriba)</option></select></label>
     <label class="fila"><input type="checkbox" ${a.finAuto ? 'checked' : ''} data-chg="finAuto"> Terminar la partida automáticamente al cumplirse una victoria</label>
     <label class="fila"><input type="checkbox" ${a.salasAbiertas ? 'checked' : ''} data-chg="salasAbiertas"> Permitir salas de voz privadas</label>
-    <label class="fila"><input type="checkbox" ${a.salasNom ? 'checked' : ''} data-chg="salasNom"> Mantener las salas durante las nominaciones</label></div>`);
+    <label class="fila"><input type="checkbox" ${a.salasNom ? 'checked' : ''} data-chg="salasNom"> Mantener las salas durante las nominaciones</label>
+    <label class="fila"><input type="checkbox" ${a.soloNominado ? 'checked' : ''} data-chg="soloNominado"> Al nominar, silenciar a todos menos al nominado</label>
+    <label class="fila">Segundos que el Espía ve el Grimorio <input type="number" min="3" max="60" value="${a.espiaSeg}" data-chg="ajuste" data-k="espiaSeg" style="width:80px"></label></div>`);
 }
 
 // ═════ panel del jugador ═════
@@ -469,6 +485,11 @@ function renderBarra() {
   b.innerHTML = h; b.hidden = !h;
 }
 function htmlBarra() {
+  const base = htmlBarraBase();
+  const mut = !soyNar && S.silenciados.includes(yo) && S.fase !== 'noche';
+  return (mut ? '<div class="aviso">🔇 Estás silenciado: nadie te oye ahora.</div>' : '') + base;
+}
+function htmlBarraBase() {
   if (soyNar) return armada ? `<h4>Ficha armada: ${FICHAS[armada].icono} ${esc(FICHAS[armada].nombre)}</h4><small>Toca un asiento para colocarla.</small><div class="fila" style="margin-top:.4rem">${btn('desarmar', 'Cancelar')}</div>` : '';
   const p = pj(yo); if (!p) return '';
   if (despertar) {
@@ -484,12 +505,9 @@ function htmlBarra() {
   let h = '';
   const t = sel && pj(sel);
   if (S.fase === 'nominaciones' && p.vivo && !S.nominadores.includes(yo)) {
-    const ok = t && t.vivo && !S.nominados.includes(t.id);
-    h += `<h4>📣 Nominaciones</h4>${t ? `<div class="fila">${btn('nominar', `Nominar a ${esc(t.nombre)}`, ok ? '' : 'disabled', 'primario')}</div>${!t.vivo ? '<small>Solo se puede nominar a jugadores vivos.</small>' : S.nominados.includes(t.id) ? '<small>Ya ha sido nominado hoy.</small>' : ''}` : '<small>Toca a un jugador para nominarlo.</small>'}`;
+    const ok = t && t.vivo && t.id !== yo && !S.nominados.includes(t.id);
+    h += `<h4>📣 Nominaciones</h4>${t ? `<div class="fila">${btn('nominar', `Nominar a ${esc(t.nombre)}`, ok ? '' : 'disabled', 'primario')}</div>${t.id === yo ? '<small>No puedes nominarte a ti mismo.</small>' : !t.vivo ? '<small>Solo se puede nominar a jugadores vivos.</small>' : S.nominados.includes(t.id) ? '<small>Ya ha sido nominado hoy.</small>' : ''}` : '<small>Toca a otro jugador para nominarlo (no puedes nominarte a ti mismo).</small>'}`;
   } else if (S.fase === 'nominaciones' && p.vivo) h += '<h4>📣 Nominaciones</h4><small>Ya has nominado hoy.</small>';
-  if (p.vivo && ['dia', 'nominaciones'].includes(S.fase) && p.rol === 'cazador' && !cazadorUsado) {
-    h += `<div class="fila" style="margin-top:.5rem">${btn('cazar', t ? `🏹 Disparar a ${esc(t.nombre)}` : '🏹 Disparar (elige a un jugador)', t ? '' : 'disabled', 'peligro')}</div>`;
-  }
   return h;
 }
 
@@ -503,8 +521,10 @@ function renderModal() {
       <div style="margin-top:1rem">${soyNar ? btn('lobby', '↩️ Volver a la sala', '', 'primario') : '<small>Esperando al Narrador…</small>'}</div>`;
     m.hidden = false;
   } else if (espia) {
-    c.innerHTML = `<h2>🕵️ El Grimorio</h2><table class="grim">${espia.map(f => `<tr><td>${f.vivo ? '' : '💀 '}${esc(f.nombre)}</td><td>${esc(f.rol)}${f.cree ? `<br><small>cree ser ${esc(f.cree)}</small>` : ''}</td><td>${f.fichas.map(esc).join('<br>')}</td></tr>`).join('')}</table>
-      <div style="margin-top:1rem">${btn('cerrarEspia', 'Cerrar', '', 'primario')}</div>`;
+    const resto = Math.max(0, Math.ceil((espiaHasta - Date.now()) / 1000));
+    c.innerHTML = `<h2>📸 Captura del Grimorio</h2><p class="aviso">Memorízalo: se cerrará solo en <b>${resto} s</b> y no podrás volver a verlo.</p>
+      <table class="grim">${espia.map(f => `<tr><td>${f.vivo ? '' : '💀 '}${esc(f.nombre)}</td><td>${esc(f.rol)}${f.cree ? `<br><small>cree ser ${esc(f.cree)}</small>` : ''}</td><td>${f.fichas.map(esc).join('<br>')}</td></tr>`).join('')}</table>
+      <div style="margin-top:1rem">${btn('cerrarEspia', 'Cerrar ya', '', 'primario')}</div>`;
     m.hidden = false;
   } else m.hidden = true;
 }
@@ -554,7 +574,6 @@ const ACT = {
   iniciarVoto: () => enviar({ t: 'iniciarVoto' }),
   cancelarVoto: () => enviar({ t: 'cancelarVoto' }),
   virgen: d => enviar({ t: 'virgen', ejecutar: d.v === '1' }),
-  cazador: d => enviar({ t: 'cazador', matar: d.v === '1' }),
   lobby: () => enviar({ t: 'lobby' }),
   terminar: d => confirm('¿Terminar la partida ahora?') && enviar({ t: 'terminar', ganador: d.v }),
   anuncio: () => { const t = window.prompt('Anuncio para todos los jugadores:'); if (t) enviar({ t: 'anuncio', texto: t }); },
@@ -583,6 +602,11 @@ const ACT = {
   ponerFicha: d => sel && enviar({ t: 'ficha', id: sel, ficha: d.v, accion: 'poner' }),
   armar: d => { armada = armada === d.v ? null : d.v; render(); },
   desarmar: () => { armada = null; render(); },
+  // moderación y Cazador
+  silenciar: d => sel && enviar({ t: 'silenciar', id: sel, on: d.v === '1' }),
+  expulsar: () => sel && confirm(`¿Echar a ${nom(sel)} de la sala?`) && enviar({ t: 'expulsar', id: sel }),
+  disparo: d => enviar({ t: 'disparo', id: +d.id, objetivo: +d.o, matar: d.v === '1' }),
+  salaLimite: d => { const t = window.prompt('Máximo de personas en esta sala (0 = sin límite):'); if (t !== null && t.trim() !== '') enviar({ t: 'salaLimite', id: d.id, max: +t }); },
   // salas de voz
   unirSala: d => enviar({ t: 'sala', sala: d.id }),
   salaCrear: () => { const t = window.prompt('Nombre de la nueva sala:'); if (t) enviar({ t: 'salaCrear', nombre: t }); },
@@ -593,7 +617,6 @@ const ACT = {
   confirmarEleccion: () => enviar({ t: 'elegir', targets: elegidos }),
   nominar: () => sel && enviar({ t: 'nominar', target: sel }),
   mano: () => { const p = pj(yo); enviar({ t: 'mano', alzada: !p.mano }); },
-  cazar: () => { if (!sel) return; if (confirm(`¿Disparar a ${nom(sel)}? Solo puedes hacerlo una vez.`)) { enviar({ t: 'cazar', target: sel }); cazadorUsado = true; render(); } },
   cerrarEspia: () => { espia = null; render(); }
 };
 const CHG = {
@@ -604,6 +627,8 @@ const CHG = {
   finAuto: (d, el) => enviar({ t: 'config', finAuto: el.checked }),
   salasAbiertas: (d, el) => enviar({ t: 'config', salasAbiertas: el.checked }),
   salasNom: (d, el) => enviar({ t: 'config', salasNom: el.checked }),
+  soloNominado: (d, el) => enviar({ t: 'config', soloNominado: el.checked }),
+  cazObj: (d, el) => { borradores.cazObj = el.value; render(); },
   sala: (d, el) => enviar({ t: 'moverJugador', id: +d.id, sala: el.value })
 };
 
@@ -612,6 +637,7 @@ $('#mic').onclick = () => { silenciado = !silenciado; aplicarMic(); };
 function aplicarMic() { if (!micTrack) return; micTrack.enabled = !silenciado; $('#mic').textContent = silenciado ? '🔇' : '🎙️'; }
 setInterval(() => {
   if (!S) return;
+  if (espia) { if (Date.now() >= espiaHasta) espia = null; renderModal(); }
   $('#reloj').textContent = S.deadline ? Math.max(0, Math.ceil((S.deadline - S.ahora) / 1000 - (performance.now() - S._rx) / 1000)) + 's' : '';
 }, 250);
 
@@ -669,7 +695,7 @@ function oye(emisor, oyente) {
     if (oyente === nar) return despiertoDe(emisor);
     return false;
   }
-  if (emisor !== nar && S.silencio) return false;
+  if (emisor !== nar && S.silenciados.includes(emisor)) return false;
   if (emisor === nar && S.megafono) return true;
   if (!S.salasActivas) return true;
   return salaDe(emisor) === salaDe(oyente);
@@ -700,7 +726,7 @@ setInterval(() => {
   if (!localAn || !micTrack) return;
   const now = performance.now();
   if (micTrack.enabled && rms(localAn, localBuf) > 0.025) ultimoVoz = now;
-  const puede = S.fase !== 'noche' && !(S.silencio && !soyNar);
+  const puede = S.fase !== 'noche' && !S.silenciados.includes(yo);
   const on = puede && now - ultimoVoz < 300;
   if (on !== yoHabla) { yoHabla = on; enviar({ t: 'habla', on }); }
 }, 120);
