@@ -7,7 +7,7 @@ let ws, yo = null, S = null, ROLES = {}, FICHAS = {}, DIST = {}, MIN = 3, soyNar
 let sel = null, armada = null, elegidos = [], despertar = null, eleccionEnviada = false;
 let infos = [], borradores = {}, abiertos = new Set(['asiento', 'fichas', 'noche']), silenciado = false;
 let login = null, codigoSala = null, reconectando = false, intentos = 0, vozFalla = [], vozSig = '';
-let espia = null, espiaHasta = 0, angMan = 0, yoHabla = false, ultimoVoz = 0;
+let captura = null, capturaHasta = 0, bluffSel = [], espia = null, espiaHasta = 0, angMan = 0, yoHabla = false, ultimoVoz = 0;
 let hablandoSet = new Set();
 const peers = new Map();
 let audioCtx, micStream = null, micTrack = null, localAn = null, localBuf = null;
@@ -102,9 +102,10 @@ function alMensaje(m) {
     case 'msg': log(m.texto, m.privado); break;
     case 'info': infos.unshift({ momento: m.momento, texto: m.texto }); if (!m.reenvio) { log('✉️ ' + m.texto, true); toast('✉️ El Narrador te ha enviado información'); } render(); break;
     case 'despertar': despertar = m; elegidos = []; eleccionEnviada = false; toast('🌙 El Narrador te ha despertado'); aplicarMic(); render(); break;
-    case 'dormir': espia = null; despertar = null; elegidos = []; eleccionEnviada = false; aplicarMic(); render(); break;
+    case 'dormir': espia = null; captura = null; despertar = null; elegidos = []; eleccionEnviada = false; aplicarMic(); render(); break;
     case 'ack': eleccionEnviada = true; toast('✔ Elección enviada'); render(); break;
     case 'sugerencia': borradores['info:' + m.id] = m.texto; render(); break;
+    case 'captura': captura = { titulo: m.titulo, grupos: m.grupos }; capturaHasta = Date.now() + (m.seg || 15) * 1000; render(); break;
     case 'grimorioEspia': espia = m.filas; espiaHasta = Date.now() + (m.seg || 15) * 1000; render(); break;
     case 'expulsado': alert(m.texto); location.hash = ''; location.reload(); break;
     case 'habla': if (m.on) hablandoSet.add(m.id); else hablandoSet.delete(m.id); pintarHabla(); break;
@@ -122,7 +123,7 @@ function alEstado(m) {
     elegidos = []; armada = null; yoHabla = false;
     if (m.fase !== 'noche') { despertar = null; eleccionEnviada = false; }
     if (m.fase === 'lobby') infos = [];
-    espia = null; // la captura del Grimorio no sobrevive a un cambio de fase
+    espia = null; captura = null; // las capturas no sobreviven a un cambio de fase
   }
   if (!m.yo.despierto && despertar && m.fase === 'noche') { /* el Narrador aún no lo ha dormido */ }
   gestionarPeers(); aplicarMic(); actualizarEmision(); render();
@@ -395,11 +396,23 @@ function htmlNominaciones() {
 
 function htmlPrimeraNoche(G) {
   const hay7 = S.asientos.length >= 7;
-  let h = `<div class="it"><b>😈 Equipo malvado (primera noche)</b><div class="btns">${btn('aliados', '👁️ Que los malos se conozcan')}</div>`;
+  let h = `<div class="it"><b>😈 Equipo malvado (primera noche)</b><br><small>Solo se señala quiénes son; no se les dicen sus roles. Se muestra como captura temporal.</small>
+    <div class="btns">${btn('aliados', '🗡️ Enseñar a los Esbirros', 'data-v="esbirros" title="Quién es el Diablo y quiénes son sus compañeros"')}${btn('aliados', '😈 Enseñar al Diablo', 'data-v="diablo" title="Quiénes son sus Esbirros"')}</div>`;
   if (hay7) {
-    h += `<small>El Diablo aprende 3 roles buenos que NO están en juego:</small><br>${G.bluffs ? G.bluffs.map(r => `<span class="chip">${rolTxt(r)}</span>`).join('') : '<small>(sin generar)</small>'}
-      <div class="btns">${btn('bluffs', '🎲 Generar', 'data-v="reroll"')}${G.bluffs ? btn('bluffs', '✉️ Enviar al Diablo', 'data-v="enviar"', 'primario') : ''}</div>`;
-  } else h += '<small>Con menos de 7 jugadores no se enseñan roles al Diablo.</small>';
+    const disp = G.bluffDisp, max = Math.min(3, disp.length);
+    bluffSel = bluffSel.filter(r => disp.includes(r));
+    const grupo = (tp, tit) => `<div style="margin:.35rem 0 .05rem"><small>${tit}</small></div>` + disp.filter(r => ROLES[r].tipo === tp).map(r =>
+      `<label class="chk t-${tp}" title="${esc(ROLES[r].desc)}${S.jugadores.some(p => p.cree === r) ? ' · Lo cree un Borracho' : ''}"><input type="checkbox" data-chg="bluff" value="${r}" ${bluffSel.includes(r) ? 'checked' : ''}>${ROLES[r].icono} ${ROLES[r].nombre}${S.jugadores.some(p => p.cree === r) ? ' 🥴' : ''}</label>`).join('');
+    h += `<div style="margin-top:.5rem"><b>Roles que NO están en juego</b> <small>(elige tú ${max} para enseñar al Diablo: <b class="${bluffSel.length === max ? 'ok' : 'aviso'}">${bluffSel.length}/${max}</b>)</small>
+      ${grupo('pueblerino', 'Pueblerinos')}${grupo('forastero', 'Forasteros')}
+      ${S.jugadores.some(p => p.cree) ? '<small>🥴 = rol que un Borracho cree tener (no está en juego, pero tenlo en cuenta).</small>' : ''}
+      <div class="btns">${btn('bluffDiablo', '📸 Enseñar al Diablo', bluffSel.length === max ? '' : 'disabled', 'primario')}</div>`;
+    if (S.jugadores.some(p => p.rol === 'canciller') && bluffSel.length) {
+      const cr = bluffSel.includes(borradores.cancRol) ? borradores.cancRol : bluffSel[0];
+      h += `<div class="btns"><small>Canciller aprende 1:</small><select data-chg="cancRol">${bluffSel.map(r => `<option value="${r}" ${r === cr ? 'selected' : ''}>${ROLES[r].icono} ${ROLES[r].nombre}</option>`).join('')}</select>${btn('bluffCanciller', '🌹 Enseñar al Canciller', '', '')}</div>`;
+    }
+    h += '</div>';
+  } else h += '<br><small>Con menos de 7 jugadores no se enseñan roles al Diablo.</small>';
   return h + '</div>';
 }
 
@@ -495,7 +508,7 @@ function htmlAjustes() {
     <label class="fila"><input type="checkbox" ${a.salasAbiertas ? 'checked' : ''} data-chg="salasAbiertas"> Permitir salas de voz privadas</label>
     <label class="fila"><input type="checkbox" ${a.salasNom ? 'checked' : ''} data-chg="salasNom"> Mantener las salas durante las nominaciones</label>
     <label class="fila"><input type="checkbox" ${a.soloNominado ? 'checked' : ''} data-chg="soloNominado"> Al nominar, silenciar a todos menos al nominado</label>
-    <label class="fila">Segundos que el Espía ve el Grimorio <input type="number" min="3" max="60" value="${a.espiaSeg}" data-chg="ajuste" data-k="espiaSeg" style="width:80px"></label></div>`);
+    <label class="fila">Segundos que dura una captura (Espía y roles del Diablo) <input type="number" min="3" max="60" value="${a.espiaSeg}" data-chg="ajuste" data-k="espiaSeg" style="width:80px"></label></div>`);
 }
 
 // ═════ panel del jugador ═════
@@ -561,6 +574,13 @@ function renderModal() {
       <table class="grim">${espia.map(f => `<tr><td>${f.vivo ? '' : '💀 '}${esc(f.nombre)}</td><td>${esc(f.rol)}${f.cree ? `<br><small>cree ser ${esc(f.cree)}</small>` : ''}</td><td>${f.fichas.map(esc).join('<br>')}</td></tr>`).join('')}</table>
       <div style="margin-top:1rem">${btn('cerrarEspia', 'Cerrar ya', '', 'primario')}</div>`;
     m.hidden = false;
+  } else if (captura) {
+    const resto = Math.max(0, Math.ceil((capturaHasta - Date.now()) / 1000));
+    c.innerHTML = `<h2>📸 ${esc(captura.titulo)}</h2><p class="aviso">Memorízalo: se cerrará solo en <b>${resto} s</b> y no podrás volver a verlo.</p>` +
+      captura.grupos.map(g => `${g.titulo ? `<div class="grupo" style="--c:#ffffff55"><b>${esc(g.titulo)}</b></div>` : ''}` +
+        (g.items.length ? g.items.map(i => `<div class="rolfila"><div class="ic">${i.icono}</div><div><b>${esc(i.nombre)}</b>${i.desc ? `<p>${esc(i.desc)}</p>` : ''}</div></div>`).join('') : `<small class="tenue">${esc(g.vacio || '—')}</small>`)).join('') +
+      `<div style="margin-top:1rem">${btn('cerrarCaptura', 'Cerrar ya', '', 'primario')}</div>`;
+    m.hidden = false;
   } else m.hidden = true;
 }
 $('#modal').addEventListener('click', e => { const b = e.target.closest('[data-act]'); if (b) ACT[b.dataset.act] && ACT[b.dataset.act](b.dataset, b); });
@@ -619,8 +639,10 @@ const ACT = {
   sugerir: d => enviar({ t: 'sugerir', id: +d.id }),
   info: d => { const t = draft(d.id); if (!t) return toast('Escribe la información primero.'); enviar({ t: 'info', id: +d.id, texto: t }); borradores['info:' + d.id] = ''; render(); },
   espia: d => enviar({ t: 'grimorioEspia', id: +d.id }),
-  aliados: () => enviar({ t: 'aliados' }),
-  bluffs: d => enviar({ t: 'bluffs', reroll: d.v === 'reroll', enviar: d.v === 'enviar' }),
+  aliados: d => enviar({ t: 'aliados', quien: d.v }),
+  bluffDiablo: () => enviar({ t: 'bluffs', a: 'diablo', roles: bluffSel }),
+  bluffCanciller: () => { const cr = bluffSel.includes(borradores.cancRol) ? borradores.cancRol : bluffSel[0]; if (cr) enviar({ t: 'bluffs', a: 'canciller', roles: [cr] }); },
+  cerrarCaptura: () => { captura = null; render(); },
   fichaMuerte: d => enviar({ t: 'ficha', id: +d.id, ficha: 'muerto_diablo', accion: 'poner' }),
   transferir: d => {
     const m = +(borradores.transfer || document.querySelector('[data-draft="transfer"]')?.value || 0);
@@ -665,6 +687,13 @@ const CHG = {
   salasAbiertas: (d, el) => enviar({ t: 'config', salasAbiertas: el.checked }),
   salasNom: (d, el) => enviar({ t: 'config', salasNom: el.checked }),
   soloNominado: (d, el) => enviar({ t: 'config', soloNominado: el.checked }),
+  bluff: (d, el) => { // el Narrador elige qué roles enseñar (máximo 3)
+    const max = Math.min(3, S.grim.bluffDisp.length);
+    if (el.checked) { if (bluffSel.length >= max) { el.checked = false; toast(`Solo puedes elegir ${max}.`); return; } bluffSel.push(el.value); }
+    else bluffSel = bluffSel.filter(r => r !== el.value);
+    render();
+  },
+  cancRol: (d, el) => { borradores.cancRol = el.value; },
   cazObj: (d, el) => { borradores.cazObj = el.value; render(); },
   sala: (d, el) => enviar({ t: 'moverJugador', id: +d.id, sala: el.value })
 };
@@ -675,6 +704,7 @@ function aplicarMic() { if (!micTrack) return; micTrack.enabled = !silenciado; $
 setInterval(() => {
   if (!S) return;
   if (espia) { if (Date.now() >= espiaHasta) espia = null; renderModal(); }
+  if (captura) { if (Date.now() >= capturaHasta) captura = null; renderModal(); }
   $('#reloj').textContent = S.deadline ? Math.max(0, Math.ceil((S.deadline - S.ahora) / 1000 - (performance.now() - S._rx) / 1000)) + 's' : '';
 }, 250);
 

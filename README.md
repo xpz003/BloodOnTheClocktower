@@ -69,7 +69,7 @@ Cada navegador se conecta directamente con todos los demás, y algunas redes (m�
 - **Nombres:** no se permiten nombres repetidos en una sala (sin distinguir mayúsculas ni tildes).
 - **Límite por sala:** el Narrador fija el máximo de personas de cada sala de voz (👥). El Narrador puede mover a alguien aunque esté llena.
 - **Barón:** los jugadores ven siempre los números **originales** de la tabla, para no delatar que hay un Barón.
-- **Espía:** ve el Grimorio como una **captura temporal** (por defecto 15 s, configurable) que se cierra sola y no puede volver a abrir.
+- **Capturas temporales:** el Grimorio del Espía, los roles del Diablo y la información del equipo malvado se muestran un momento (15 s por defecto, configurable), se cierran solas, no quedan guardadas y no se pueden volver a ver.
 - **Nominaciones:** no se puede nominar a uno mismo.
 
 ## Qué ve cada uno
@@ -81,7 +81,9 @@ Cada navegador se conecta directamente con todos los demás, y algunas redes (m�
 El Narrador ve la lista de roles que despiertan, **en orden**, y para cada uno puede:
 - **Despertar**: se abre una conversación de voz privada entre ambos y el jugador recibe su elección (por ejemplo, la Adivina elige 2 jugadores).
 - **Sugerir** la información correcta (el servidor la calcula; si el jugador está borracho te avisa) y **Enviarla** editada como quieras.
-- Mostrar el Grimorio al Espía, que los malos se conozcan, o enseñar 3 roles que no están en juego al Diablo (solo con 7+ jugadores).
+- Mostrar el Grimorio al Espía como una **captura** temporal.
+- **Equipo malvado (primera noche):** solo se **señala quiénes son**, sin decir sus roles. Botón *Enseñar a los Esbirros* (ven quién es el Diablo y sus compañeros) y *Enseñar al Diablo* (ve quiénes son sus Esbirros). Se muestra como captura.
+- **Roles que no están en juego (7 o más jugadores):** el Narrador **elige él** 3 roles de la lista de roles disponibles y se los enseña al Diablo como captura. Nada se asigna al azar. Si hay Canciller, elige cuál de esos 3 le enseña (1).
 - Poner fichas de **Muerto**: los jugadores marcados mueren al **Amanecer**.
 
 ## El día

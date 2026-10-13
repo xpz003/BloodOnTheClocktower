@@ -67,6 +67,14 @@ function darInfo(room, p, texto) {
   p.infos.push({ momento: mo, texto });
   send(p.ws, { t: 'info', texto, momento: mo });
 }
+// Captura temporal: se muestra un momento y no queda guardada (no se puede volver a ver)
+function capturar(room, p, datos) { send(p.ws, { t: 'captura', seg: room.ajustes.espiaSeg, ...datos }); }
+const rolItems = roles => roles.map(r => ({ icono: ROLES[r].icono, nombre: ROLES[r].nombre, desc: ROLES[r].desc }));
+// Roles buenos que NO están realmente en juego (el rol que cree ser el Borracho tampoco lo está: el Narrador decide si lo enseña)
+function bluffDisponibles(room) {
+  const usados = new Set(rolesAsignados(room));
+  return Object.keys(ROLES).filter(r => ROLES[r].equipo === 'bien' && !usados.has(r));
+}
 function nuevoJugador(nombre, ws) {
   return { id: nextId++, nombre, vivo: true, rol: null, cree: null, fichas: [], votoFantasma: true, mano: false, off: false, sala: 'plaza', habla: false, infos: [], prompt: null, ws };
 }
@@ -168,7 +176,7 @@ function grimorio(room) {
     rolesElegidos: room.rolesElegidos, enJuego: rolesEnJuego(room), fichasDisp: fichasDisponibles(room),
     lista: room.fase === 'noche' ? listaNoche(room) : [],
     despiertos: [...room.despiertos], elecciones: room.elecciones,
-    virgen: room.pendienteVirgen, bluffs: room.bluffs, silenciados: [...room.silenciados],
+    virgen: room.pendienteVirgen, bluffDisp: bluffDisponibles(room), silenciados: [...room.silenciados],
     eventos: room.eventos.slice(-60)
   };
 }
@@ -813,33 +821,43 @@ wss.on('connection', ws => {
         aviso(room, `🕵️ Captura del Grimorio mostrada a ${p.nombre} durante ${room.ajustes.espiaSeg} s.`);
         return;
       }
-      case 'aliados': { // el equipo malvado se conoce (primera noche)
+      case 'aliados': { // primera noche: SOLO se señala quiénes son; no se dicen los roles
         const malos = jugadores(room).filter(p => equipo(p) === 'mal');
-        for (const p of malos) {
-          const otros = malos.filter(q => q.id !== p.id).map(q => `${q.nombre} (${ROLES[q.rol].nombre} ${ROLES[q.rol].icono})`);
-          darInfo(room, p, otros.length ? `Tus aliados malvados: ${otros.join(', ')}.` : 'Eres el único malvado.');
+        const diablos = malos.filter(p => tipo(p) === 'diablo'), esbirros = malos.filter(p => tipo(p) !== 'diablo');
+        const quienes = l => l.map(q => ({ icono: '👤', nombre: q.nombre }));
+        if (m.quien === 'diablo') {
+          diablos.forEach(p => capturar(room, p, { titulo: '😈 Estos son tus Esbirros', grupos: [{ items: quienes(esbirros), vacio: 'No tienes Esbirros.' }] }));
+          aviso(room, '😈 Captura mostrada al Diablo: quiénes son sus Esbirros (sin roles).');
+        } else {
+          esbirros.forEach(p => capturar(room, p, { titulo: '🗡️ Tu equipo malvado', grupos: [
+            { titulo: 'El Diablo', items: quienes(diablos) },
+            { titulo: 'Tus compañeros Esbirros', items: quienes(esbirros.filter(q => q.id !== p.id)), vacio: 'Eres el único Esbirro.' }] }));
+          aviso(room, '🗡️ Captura mostrada a los Esbirros: quién es el Diablo y sus compañeros (sin roles).');
         }
-        aviso(room, '😈 Enviado el equipo malvado a todos los malos.');
+        registrar(room, `Se muestra el equipo malvado (${m.quien === 'diablo' ? 'al Diablo' : 'a los Esbirros'}), solo nombres.`);
         return;
       }
-      case 'bluffs': { // roles buenos que NO están en juego, para el Diablo
+      case 'bluffs': { // el Narrador ELIGE qué roles que no están en juego enseña (no se asignan solos)
         if (jugadores(room).length < 7) return err(ws, 'Solo se enseñan roles al Diablo si hay 7 o más jugadores.');
-        const usados = new Set(rolesAsignados(room)); jugadores(room).forEach(p => p.cree && usados.add(p.cree));
-        if (m.reroll || !room.bluffs) {
-          room.bluffs = shuffle(Object.keys(ROLES).filter(r => ROLES[r].equipo === 'bien' && !usados.has(r))).slice(0, 3);
+        const disp = bluffDisponibles(room);
+        const roles = [...new Set(m.roles || [])].filter(r => disp.includes(r));
+        if (m.a === 'canciller') {
+          if (roles.length !== 1) return err(ws, 'Elige 1 rol para el Canciller.');
+          const cs = jugadores(room).filter(p => p.rol === 'canciller');
+          if (!cs.length) return err(ws, 'No hay Canciller en la partida.');
+          cs.forEach(p => capturar(room, p, { titulo: '🌹 El Diablo sabe que este rol NO está en juego', grupos: [{ items: rolItems(roles) }] }));
+          aviso(room, '🌹 Captura mostrada al Canciller (1 rol).'); registrar(room, `Se enseña al Canciller: ${rolItems(roles)[0].nombre}.`);
+          return;
         }
-        if (m.enviar) {
-          const txt = room.bluffs.map(r => `${ROLES[r].nombre} ${ROLES[r].icono}`).join(', ');
-          for (const p of jugadores(room)) {
-            if (tipo(p) === 'diablo') darInfo(room, p, `Estos roles NO están en juego: ${txt}.`);
-            if (p.rol === 'canciller') darInfo(room, p, `El Diablo sabe que este rol NO está en juego: ${ROLES[room.bluffs[0]].nombre} ${ROLES[room.bluffs[0]].icono}.`);
-          }
-          aviso(room, '😈 Roles falsos enviados al Diablo (y 1 al Canciller).');
-        }
-        enviarEstado(room);
+        const n = Math.min(3, disp.length);
+        if (roles.length !== n) return err(ws, `Elige exactamente ${n} rol${n === 1 ? '' : 'es'} para enseñar al Diablo.`);
+        const ds = jugadores(room).filter(p => tipo(p) === 'diablo');
+        if (!ds.length) return err(ws, 'No hay ningún Diablo en la partida.');
+        ds.forEach(p => capturar(room, p, { titulo: '😈 Estos roles NO están en juego', grupos: [{ items: rolItems(roles) }] }));
+        aviso(room, '😈 Captura mostrada al Diablo con los roles que has elegido.');
+        registrar(room, `Se enseñan al Diablo: ${rolItems(roles).map(r => r.nombre).join(', ')}.`);
         return;
       }
-
       // ── mesa ──
       case 'anuncio': { const t = String(m.texto || '').slice(0, 200); if (t) anunciar(room, '📜 Narrador: ' + t); return; }
       case 'susurro': { const p = jug(m.id), t = String(m.texto || '').slice(0, 300); if (p && t) darInfo(room, p, t); return; }
