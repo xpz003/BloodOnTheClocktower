@@ -6,6 +6,7 @@ const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;'
 let ws, yo = null, S = null, ROLES = {}, FICHAS = {}, DIST = {}, MIN = 3, soyNar = false;
 let sel = null, armada = null, elegidos = [], despertar = null, eleccionEnviada = false;
 let infos = [], borradores = {}, abiertos = new Set(['asiento', 'fichas', 'noche']), silenciado = false;
+let login = null, codigoSala = null, reconectando = false, intentos = 0, vozFalla = [], vozSig = '';
 let espia = null, espiaHasta = 0, angMan = 0, yoHabla = false, ultimoVoz = 0;
 let hablandoSet = new Set();
 const peers = new Map();
@@ -34,14 +35,34 @@ async function entrar(msg) {
   if (!nombre) return ($('#errorInicio').textContent = 'Escribe tu nombre.');
   if (msg.t === 'unirse' && $('#codigo').value.trim().length < 4) return ($('#errorInicio').textContent = 'Escribe el código de 4 letras.');
   localStorage.setItem('nombre', nombre);
-  msg.nombre = nombre; $('#errorInicio').textContent = '';
+  msg.nombre = nombre; login = { nombre }; $('#errorInicio').textContent = '';
   audioCtx = new (window.AudioContext || window.webkitAudioContext)();
   await audioCtx.resume();
   await pedirMic();
-  ws = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host);
-  ws.onopen = () => ws.send(JSON.stringify(msg));
-  ws.onmessage = e => alMensaje(JSON.parse(e.data));
-  ws.onclose = () => { if (yo != null) toast('Conexión perdida. Recarga la página.'); };
+  abrirWS(msg);
+}
+function abrirWS(msg) {
+  const s = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host);
+  ws = s;
+  s.onopen = () => s.send(JSON.stringify(msg));
+  s.onmessage = e => { if (s === ws) alMensaje(JSON.parse(e.data)); };
+  s.onclose = () => { if (s === ws) alCerrarWS(); };
+}
+// Si se corta la conexión sin querer, se vuelve a entrar solo con el mismo nombre y código de sala
+function alCerrarWS() {
+  if (yo == null) return; // nunca llegó a entrar
+  reconectando = true; reintentar();
+}
+function reintentar() {
+  if (intentos++ >= 60) { alert('No se ha podido volver a conectar. Recarga la página para intentarlo de nuevo.'); return; }
+  pintarConexion();
+  setTimeout(() => abrirWS({ t: 'unirse', nombre: login.nombre, codigo: codigoSala }), intentos === 1 ? 400 : 2000);
+}
+function pintarConexion() {
+  const el = $('#conexion'); let t = '';
+  if (reconectando) t = `🔄 Conexión perdida. Reconectando… (intento ${intentos})`;
+  else if (S && S.narrador.off) t = '⚠️ El Narrador se ha desconectado. La partida espera a que vuelva.';
+  el.textContent = t; el.hidden = !t;
 }
 const enviar = o => ws && ws.readyState === 1 && ws.send(JSON.stringify(o));
 
@@ -60,15 +81,26 @@ async function pedirMic() {
 
 function alMensaje(m) {
   switch (m.t) {
-    case 'error': $('#errorInicio').textContent = m.texto; toast(m.texto); if (yo == null && ws) ws.close(); break;
+    case 'error':
+      if (reconectando) { // durante una reconexión: se reintenta, salvo que ya no haya sala o nos hayan echado
+        if (/no existe|echado|ya ha empezado/.test(m.texto)) { alert(m.texto); location.hash = ''; location.reload(); } else if (ws) ws.close();
+        return;
+      }
+      $('#errorInicio').textContent = m.texto; toast(m.texto); if (yo == null && ws) ws.close(); break;
     case 'bienvenida':
-      yo = m.id; ROLES = m.roles; FICHAS = m.fichas; DIST = m.dist; MIN = m.min;
+      yo = m.id; ROLES = m.roles; FICHAS = m.fichas; DIST = m.dist; MIN = m.min; codigoSala = m.codigo;
+      if (m.ice && m.ice.length) ICE = { iceServers: m.ice, iceCandidatePoolSize: 2 }; // red de audio configurada por el servidor (TURN)
+      if (reconectando || m.reconectado) { // volvemos a una partida en curso: se empieza de cero con las conexiones de voz
+        reconectando = false; intentos = 0; infos = []; despertar = null; hablandoSet = new Set();
+        for (const pe of peers.values()) cerrarPeer(pe);
+        peers.clear(); resets.clear(); pintarConexion(); toast('✅ Has vuelto a la partida');
+      }
       $('#cod').textContent = m.codigo; $('#inicio').hidden = true; $('#juego').hidden = false;
       history.replaceState(null, '', '#' + m.codigo);
       break;
     case 'estado': alEstado(m); break;
     case 'msg': log(m.texto, m.privado); break;
-    case 'info': infos.unshift({ momento: m.momento, texto: m.texto }); log('✉️ ' + m.texto, true); toast('✉️ El Narrador te ha enviado información'); render(); break;
+    case 'info': infos.unshift({ momento: m.momento, texto: m.texto }); if (!m.reenvio) { log('✉️ ' + m.texto, true); toast('✉️ El Narrador te ha enviado información'); } render(); break;
     case 'despertar': despertar = m; elegidos = []; eleccionEnviada = false; toast('🌙 El Narrador te ha despertado'); aplicarMic(); render(); break;
     case 'dormir': espia = null; despertar = null; elegidos = []; eleccionEnviada = false; aplicarMic(); render(); break;
     case 'ack': eleccionEnviada = true; toast('✔ Elección enviada'); render(); break;
@@ -111,7 +143,7 @@ function render() {
   if (!S) return;
   document.body.classList.toggle('noche', S.fase === 'noche');
   $('#fase').textContent = ETIQ_FASE[S.fase](S);
-  renderMesa(); renderLateral(); renderBarra(); renderModal(); pintarHabla();
+  renderMesa(); renderLateral(); renderBarra(); renderModal(); pintarHabla(); pintarConexion(); pintarVoz();
 }
 
 // ───────── círculo de fichas ─────────
@@ -260,6 +292,7 @@ function htmlSalas() {
     else if (S.silenciados.length) h += `<div class="aviso">🔇 Silenciados: ${S.silenciados.map(i => esc(nom(i))).join(', ')}</div>`;
     if (S.ajustes.soloNominado && S.actual && ['defensa', 'votando'].includes(S.fase)) h += `<div class="aviso">🗣️ Solo habla el nominado (${esc(nom(S.actual.a))}).</div>`;
   }
+  h += htmlAvisoVoz();
   h += S.salas.map(sa => {
     const oc = ocupantes(sa.id), aqui = yoSala === sa.id, max = sa.max || 0, llena = max > 0 && oc.length >= max;
     const bloq = noche || (sa.id !== 'plaza' && !S.ajustes.salasAbiertas && !soyNar);
@@ -308,7 +341,8 @@ function htmlPreparacion(G) {
       ${asignados ? `<small class="ok">${asignados}/${n} jugadores con rol.</small>` : ''}</div>
     <div class="it"><b>3. Empieza</b>
       <div class="btns">${btn('iniciar', '🌙 Empezar partida (Noche 1)', n >= MIN && asignados === n ? '' : 'disabled', 'primario')}</div>
-      ${n < MIN ? `<small class="aviso">Hacen falta al menos ${MIN} jugadores (sin contar al Narrador). Ahora hay ${n}.</small>` : ''}</div>`;
+      ${n < MIN ? `<small class="aviso">Hacen falta al menos ${MIN} jugadores (sin contar al Narrador). Ahora hay ${n}.</small>` : ''}
+      ${S.jugadores.some(p => p.off) ? `<br><small class="aviso">📴 Hay jugadores desconectados: se espera a que vuelvan con el mismo nombre (si no, se quitan solos a los 20 s o puedes echarlos).</small>` : ''}</div>`;
 }
 
 function htmlFase(G) {
@@ -417,6 +451,7 @@ function htmlAsiento(G) {
   }
   const mudo = G.silenciados.includes(p.id);
   h += btn('silenciar', mudo ? '🔊 Dejar hablar' : '🔇 Silenciar', `data-v="${mudo ? 0 : 1}"`) + btn('expulsar', '🚪 Echar', '', 'peligro');
+  if (!p.vivo) h += btn('votoFantasma', p.votoFantasma ? '🗳️ Quitarle el voto' : '🗳️ Devolverle el voto', `data-v="${p.votoFantasma ? 0 : 1}"`);
   h += '</div>';
   if (!mudo && S.silenciados.includes(p.id)) h += '<small class="aviso">Ahora está silenciado por el silencio general o por la nominación.</small>';
   const vc = p.cree || p.rol;
@@ -500,7 +535,7 @@ function htmlBarraBase() {
   }
   if (S.fase === 'votando') {
     const puede = p.vivo || p.votoFantasma;
-    return `<h4>🗳️ Votación contra ${esc(nom(S.voto.nominado))}</h4>${puede ? `<div class="fila">${btn('mano', p.mano ? '✋ Bajar la mano' : '✋ Levantar la mano', '', p.mano ? 'on' : 'primario')}</div><small>Tu voto cuenta cuando la manecilla te señale.</small>` : '<small>Ya no te queda voto.</small>'}`;
+    return `<h4>🗳️ Votación contra ${esc(nom(S.voto.nominado))}</h4>${puede ? `<div class="fila">${btn('mano', p.mano ? '✋ Bajar la mano' : '✋ Levantar la mano', '', p.mano ? 'on' : 'primario')}</div><small>Tu voto cuenta cuando la manecilla te señale.</small>${p.vivo ? '' : '<br><small class="aviso">💀 Es tu único voto de muerto: solo se gasta si tienes la mano levantada cuando la manecilla te señale.</small>'}` : '<small>Ya no te queda voto.</small>'}`;
   }
   let h = '';
   const t = sel && pj(sel);
@@ -603,6 +638,8 @@ const ACT = {
   armar: d => { armada = armada === d.v ? null : d.v; render(); },
   desarmar: () => { armada = null; render(); },
   // moderación y Cazador
+  votoFantasma: d => sel && enviar({ t: 'votoFantasma', id: sel, on: d.v === '1' }),
+  vozReconectar: () => reconectarVoz(),
   silenciar: d => sel && enviar({ t: 'silenciar', id: sel, on: d.v === '1' }),
   expulsar: () => sel && confirm(`¿Echar a ${nom(sel)} de la sala?`) && enviar({ t: 'expulsar', id: sel }),
   disparo: d => enviar({ t: 'disparo', id: +d.id, objetivo: +d.o, matar: d.v === '1' }),
@@ -641,18 +678,29 @@ setInterval(() => {
   $('#reloj').textContent = S.deadline ? Math.max(0, Math.ceil((S.deadline - S.ahora) / 1000 - (performance.now() - S._rx) / 1000)) + 's' : '';
 }, 250);
 
-const ICE = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }, { urls: 'stun:stun1.l.google.com:19302' }] };
+let ICE = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }, { urls: 'stun:stun1.l.google.com:19302' }] };
+const resets = new Map(); // id → { n, t }: reinicios automáticos recientes con cada persona
+const activo = id => id === S.narrador.id ? !S.narrador.off : S.jugadores.some(q => q.id === id && !q.off);
+function cerrarPeer(peer) {
+  try { peer.pc.close(); } catch (_) { /* ya cerrada */ }
+  if (peer.nodes) { try { peer.nodes.g.disconnect(); } catch (_) { /* ya desconectado */ } peer.nodes = null; }
+  if (peer.el) peer.el.srcObject = null;
+}
 function gestionarPeers() {
-  const activos = new Set([S.narrador.id, ...S.jugadores.filter(q => !q.off).map(q => q.id)]); activos.delete(yo);
+  const activos = new Set([S.narrador.id, ...S.jugadores.map(q => q.id)].filter(id => id !== yo && activo(id)));
   for (const id of activos) if (!peers.has(id)) crearPeer(id);
-  for (const [id, p] of peers) if (!activos.has(id)) { p.pc.close(); if (p.el) p.el.srcObject = null; peers.delete(id); }
+  for (const [id, p] of peers) if (!activos.has(id)) { cerrarPeer(p); peers.delete(id); resets.delete(id); }
 }
 function crearPeer(id) {
   const pc = new RTCPeerConnection(ICE);
-  const peer = { id, pc, chain: Promise.resolve(), nodes: null, sender: null, emite: true };
+  const peer = { id, pc, chain: Promise.resolve(), nodes: null, sender: null, emite: true, creado: Date.now(), malDesde: Date.now() };
   peers.set(id, peer);
-  pc.onicecandidate = e => { if (e.candidate) enviar({ t: 'rtc', to: id, data: { cand: e.candidate } }); };
+  pc.onicecandidate = e => { if (e.candidate && peers.get(id) === peer) enviar({ t: 'rtc', to: id, data: { cand: e.candidate } }); };
   pc.ontrack = e => montarAudio(peer, e.streams[0] || new MediaStream([e.track]));
+  pc.onconnectionstatechange = () => {
+    if (pc.connectionState === 'connected') { peer.malDesde = 0; aplicarBitrate(peer); actualizarEmision(); const r = resets.get(id); if (r) r.n = 0; }
+    pintarVoz();
+  };
   if (micTrack) peer.sender = pc.addTrack(micTrack, micStream);
   if (yo < id) { // el de id menor inicia la negociación
     if (!micTrack) pc.addTransceiver('audio', { direction: 'recvonly' });
@@ -664,6 +712,14 @@ function crearPeer(id) {
   return peer;
 }
 function señal(from, data) {
+  if (!S) return;
+  if (data.reset) { // la otra persona ha reiniciado la conexión: se rehace (salvo que acabemos de rehacerla nosotros)
+    const p = peers.get(from);
+    if (p && Date.now() - p.creado < 2500) return;
+    if (activo(from)) reiniciarPeer(from, false);
+    return;
+  }
+  if (!activo(from)) return;
   const peer = peers.get(from) || crearPeer(from), pc = peer.pc;
   peer.chain = peer.chain.then(async () => {
     if (data.desc) {
@@ -672,6 +728,60 @@ function señal(from, data) {
     } else if (data.cand) { try { await pc.addIceCandidate(data.cand); } catch (_) { /* candidato tardío */ } }
   }).catch(console.warn);
 }
+function reiniciarPeer(id, avisar) {
+  const viejo = peers.get(id); if (viejo) cerrarPeer(viejo);
+  peers.delete(id);
+  if (avisar) enviar({ t: 'rtc', to: id, data: { reset: true } });
+  if (S && activo(id)) crearPeer(id);
+  pintarVoz();
+}
+// Voz pequeña y estable: con muchas personas cada navegador envía su audio a todos los demás
+function aplicarBitrate(peer) {
+  const s = peer.sender; if (!s || !s.getParameters) return;
+  try { const p = s.getParameters(); if (!p.encodings || !p.encodings.length) p.encodings = [{}]; p.encodings[0].maxBitrate = 24000; s.setParameters(p).catch(() => {}); } catch (_) { /* no soportado */ }
+}
+// Cuántas conexiones de voz funcionan y con quién fallan
+function pintarVoz() {
+  const b = $('#btnVoz'); if (!S || !b) return;
+  const ids = [...new Set([S.narrador.id, ...S.jugadores.map(q => q.id)])].filter(id => id !== yo && activo(id));
+  vozFalla = ids.filter(id => !peers.get(id) || peers.get(id).pc.connectionState !== 'connected');
+  b.textContent = `🔊 ${ids.length - vozFalla.length}/${ids.length}`;
+  b.classList.toggle('mala', vozFalla.length > 0);
+  b.title = vozFalla.length ? `Sin voz con: ${vozFalla.map(nom).join(', ')}. Pulsa para reconectar.` : 'Todas las conexiones de voz funcionan.';
+  const sig = vozFalla.join(',');
+  if (sig !== vozSig) { vozSig = sig; renderLateral(); }
+}
+function htmlAvisoVoz() {
+  if (!vozFalla.length) return '';
+  return `<div class="aviso">⚠️ Sin conexión de voz con: ${vozFalla.map(i => esc(nom(i))).join(', ')} ${btn('vozReconectar', '🔄 Reconectar voz', '', 'mini')}</div>`;
+}
+function reconectarVoz() {
+  if (!S) return;
+  let n = 0;
+  for (const id of [...peers.keys()]) { const p = peers.get(id); if (p && p.pc.connectionState !== 'connected') { reiniciarPeer(id, true); n++; } }
+  gestionarPeers(); resets.clear();
+  if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume().catch(() => {});
+  actualizarEmision(); pintarVoz();
+  toast(n ? `🔄 Reconectando la voz con ${n} persona${n === 1 ? '' : 's'}…` : '✅ Todas las conexiones de voz están bien.');
+}
+$('#btnVoz').onclick = reconectarVoz;
+// Vigilante: si una conexión no se establece o se cae, se reinicia sola (con espera entre intentos)
+setInterval(() => {
+  if (!S || !audioCtx) return;
+  if (audioCtx.state === 'suspended') audioCtx.resume().catch(() => {});
+  const ahora = Date.now();
+  for (const peer of [...peers.values()]) {
+    const e = peer.pc.connectionState;
+    if (e === 'connected') peer.malDesde = 0; else if (!peer.malDesde) peer.malDesde = ahora;
+    const mala = e === 'failed' || (peer.malDesde && ahora - peer.malDesde > (e === 'disconnected' ? 6000 : 15000));
+    if (!mala) continue;
+    const r = resets.get(peer.id) || { n: 0, t: 0 };
+    if (r.n < 6 && ahora - r.t > 8000) { r.n++; r.t = ahora; resets.set(peer.id, r); reiniciarPeer(peer.id, true); }
+  }
+  actualizarEmision(); pintarVoz();
+}, 3000);
+document.addEventListener('visibilitychange', () => { if (!document.hidden && audioCtx && audioCtx.state === 'suspended') audioCtx.resume().catch(() => {}); });
+
 function montarAudio(peer, stream) {
   const el = new Audio(); el.srcObject = stream; el.muted = true; el.play().catch(() => {}); peer.el = el; // necesario en Chrome
   const src = audioCtx.createMediaStreamSource(stream);

@@ -43,10 +43,29 @@ Los jugadores ven siempre cuántos roles hay de cada tipo (Pueblerinos, Foraster
 - Durante las nominaciones las salas se pausan y todos se oyen (el Narrador puede mantenerlas activas en Ajustes).
 - El Narrador puede crear, renombrar y borrar salas, mover a cualquiera, cerrar las salas privadas, silenciar a los jugadores y usar **📢 Hablar a todos**. También puede entrar en una sala para escuchar.
 
+## Volver a entrar tras una desconexión
+- Si se corta tu conexión, el juego **reintenta solo** y te devuelve a tu sitio. Si cierras la pestaña o recargas, entra con el **mismo nombre y código** (el nombre se recuerda y el código está en la dirección).
+- Durante la partida recuperas tu asiento, tu rol, tus fichas, tu información secreta y, si estabas despierto de noche, el aviso pendiente. Un nombre nuevo no puede entrar en una partida empezada.
+- En la sala de espera tu asiento se guarda 20 s (con su rol, si ya estaba repartido). Con jugadores desconectados no se puede empezar.
+- Si se desconecta el **Narrador**, la sala le espera 3 minutos y todos ven un aviso; vuelve con su nombre y recupera el control.
+- Un jugador **expulsado** no puede volver con su nombre hasta que el Narrador vuelva a la sala de espera.
+
+## Voz con muchas personas
+Cada navegador se conecta directamente con todos los demás, y algunas redes (móviles, empresas, NAT estricto) no consiguen conectar entre sí sin un servidor **TURN**.
+- La barra superior muestra **🔊 n/N**: con cuántas personas funciona tu voz. Si falla alguna, se ve con quién y el botón **Reconectar voz** la rehace. Además, el juego reinicia solo las conexiones que no se establecen.
+- Para que conecte todo el mundo, configura un TURN en el servidor (variables de entorno):
+  ```bash
+  TURN_URL=turn:mi.servidor:3478,turns:mi.servidor:443?transport=tcp TURN_USER=usuario TURN_PASS=clave npm start
+  # o, para controlarlo todo: ICE_SERVERS='[{"urls":"stun:..."},{"urls":"turn:...","username":"...","credential":"..."}]'
+  ```
+  Puedes usar un `coturn` propio o un proveedor de TURN.
+- El audio se envía a poca velocidad (~24 kbps por persona) para que 15 jugadores sean llevaderos.
+
 ## Moderación y reglas especiales
 - **Cazador:** el jugador lo anuncia en voz alta; no tiene botón. El Narrador selecciona su asiento, elige al objetivo y decide: *Matar al objetivo* o *Sin efecto*. Se marca solo la ficha "Habilidad usada".
 - **Silenciar:** el Narrador puede silenciar a un jugador, a todos, o activar "Al nominar, silenciar a todos menos al nominado" (dura mientras haya defensa y votación). **Todos ven quién está silenciado** (🔇 en el asiento, en las salas y en el panel).
 - **Echar:** el Narrador puede expulsar a cualquier jugador desde su asiento.
+- **Voto de los muertos:** cada muerto tiene **un solo voto en toda la partida**. Se gasta cuando la manecilla le señala con la mano levantada y no se recupera aunque lo reviviesen; el Narrador puede devolvérselo a mano (🗳️ en su asiento).
 - **Nombres:** no se permiten nombres repetidos en una sala (sin distinguir mayúsculas ni tildes).
 - **Límite por sala:** el Narrador fija el máximo de personas de cada sala de voz (👥). El Narrador puede mover a alguien aunque esté llena.
 - **Barón:** los jugadores ven siempre los números **originales** de la tabla, para no delatar que hay un Barón.
