@@ -9,6 +9,7 @@ const { ROLES, FICHAS, DISTRIBUCION } = require('./roles.js');
 
 const PORT = process.env.PORT || 3000;
 const MIN_JUGADORES = 5, MAX_JUGADORES = 15; // mínimo sin contar al Narrador
+const MARCAS = ['❌', '✅', '❓', '⭐', '🔴', '🔵']; // marcas rápidas para las anotaciones de los jugadores
 const GRACIA_LOBBY = +process.env.GRACIA_LOBBY_MS || 20 * 1000; // en la sala de espera, margen para volver antes de perder el asiento
 const GRACIA_NARRADOR = +process.env.GRACIA_NAR_MS || 3 * 60 * 1000; // tiempo que se espera a un Narrador desconectado
 
@@ -76,7 +77,7 @@ function bluffDisponibles(room) {
   return Object.keys(ROLES).filter(r => ROLES[r].equipo === 'bien' && !usados.has(r));
 }
 function nuevoJugador(nombre, ws) {
-  return { id: nextId++, nombre, vivo: true, rol: null, cree: null, fichas: [], votoFantasma: true, mano: false, off: false, sala: 'plaza', habla: false, infos: [], prompt: null, ws };
+  return { id: nextId++, nombre, vivo: true, rol: null, cree: null, fichas: [], votoFantasma: true, mano: false, off: false, sala: 'plaza', habla: false, infos: [], prompt: null, notas: {}, ws };
 }
 const registrar = (room, texto) => { room.eventos.push(`${momento(room)}: ${texto}`); if (room.eventos.length > 150) room.eventos.shift(); };
 
@@ -273,7 +274,7 @@ function iniciar(room) {
   if (ps.length < MIN_JUGADORES) return err(ws, `Hacen falta al menos ${MIN_JUGADORES} jugadores (sin contar al Narrador).`);
   if (ps.some(p => !p.rol)) return err(ws, 'Todos los jugadores necesitan un rol. Elige roles y pulsa "Repartir fichas".');
   if (!ps.some(p => tipo(p) === 'diablo')) return err(ws, 'Tiene que haber al menos un Diablo.');
-  ps.forEach(p => { p.vivo = true; p.mano = false; p.votoFantasma = true; p.infos = []; p.prompt = null; });
+  ps.forEach(p => { p.vivo = true; p.mano = false; p.votoFantasma = true; p.infos = []; p.prompt = null; p.notas = {}; send(p.ws, { t: 'notas', notas: {} }); });
   room.composicion = { pueblerino: 0, forastero: 0, esbirro: 0, diablo: 0 };
   ps.forEach(p => room.composicion[tipo(p)]++);
   // Con Barón en juego se muestran los números ORIGINALES (se devuelven 2 Pueblerinos por 2 Forasteros) para no delatarlo
@@ -503,6 +504,7 @@ wss.on('connection', ws => {
       if (!reconexion) { room.players.set(player.id, player); if (m.t === 'crear') room.narrador = player.id; else room.asientos.push(player.id); }
       const roles = {}; for (const [k, ro] of Object.entries(ROLES)) roles[k] = ro;
       send(ws, { t: 'bienvenida', id: player.id, codigo: room.code, roles, fichas: FICHAS, dist: DISTRIBUCION, min: MIN_JUGADORES, ice: ICE_SERVERS, reconectado: reconexion });
+      send(ws, { t: 'notas', notas: player.notas });
       if (reconexion) {
         player.infos.forEach(i => send(ws, { t: 'info', texto: i.texto, momento: i.momento, reenvio: true }));
         if (room.fase === 'noche' && room.despiertos.has(player.id) && player.prompt) send(ws, player.prompt);
@@ -535,6 +537,20 @@ wss.on('connection', ws => {
         player.habla = on; bcast(room, { t: 'habla', id: player.id, on });
         return;
       }
+
+      // ───── anotaciones privadas: solo las ve quien las escribe ─────
+      case 'nota': {
+        if (esNar) return;
+        const t = jug(m.id);
+        if (!t) return;
+        const marca = MARCAS.includes(m.marca) ? m.marca : '';
+        const rol = ROLES[m.rol] ? m.rol : '';
+        const texto = limpiar(m.texto, 80);
+        if (!marca && !rol && !texto) delete player.notas[t.id]; else player.notas[t.id] = { marca, rol, texto };
+        send(ws, { t: 'notas', notas: player.notas });
+        return;
+      }
+      case 'notasLimpiar': if (!esNar) { player.notas = {}; send(ws, { t: 'notas', notas: {} }); } return;
 
       // ───── jugador ─────
       case 'elegir': { // elección nocturna cuando el Narrador lo ha despertado
@@ -866,7 +882,7 @@ wss.on('connection', ws => {
         if (room.fase !== 'fin') return;
         clearTimeout(room.timer);
         for (const [id, p] of room.players) if (p.off) { clearTimeout(p.limpieza); room.players.delete(id); room.asientos = room.asientos.filter(x => x !== id); }
-        jugadores(room).forEach(p => { p.vivo = true; p.rol = null; p.cree = null; p.fichas = []; p.mano = false; p.votoFantasma = true; p.infos = []; p.prompt = null; });
+        jugadores(room).forEach(p => { p.vivo = true; p.rol = null; p.cree = null; p.fichas = []; p.mano = false; p.votoFantasma = true; p.infos = []; p.prompt = null; p.notas = {}; send(p.ws, { t: 'notas', notas: {} }); });
         room.vetados.clear(); room.silenciados.clear(); room.silencio = false;
         Object.assign(room, { composicion: null, megafono: false, n: 0, dia: 0, ganador: null, motivo: '', voto: null, nominaciones: [], bloque: null, nominacionActual: null, bluffs: null, elecciones: {} });
         room.despiertos.clear(); room.hechos.clear(); room.nominadores.clear(); room.nominados.clear();

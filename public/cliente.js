@@ -7,7 +7,7 @@ let ws, yo = null, S = null, ROLES = {}, FICHAS = {}, DIST = {}, MIN = 3, soyNar
 let sel = null, armada = null, elegidos = [], despertar = null, eleccionEnviada = false;
 let infos = [], borradores = {}, abiertos = new Set(['asiento', 'fichas', 'noche']), silenciado = false;
 let login = null, codigoSala = null, reconectando = false, intentos = 0, vozFalla = [], vozSig = '';
-let captura = null, capturaHasta = 0, bluffSel = [], espia = null, espiaHasta = 0, angMan = 0, yoHabla = false, ultimoVoz = 0;
+let notas = {}, captura = null, capturaHasta = 0, bluffSel = [], espia = null, espiaHasta = 0, angMan = 0, yoHabla = false, ultimoVoz = 0;
 let hablandoSet = new Set();
 const peers = new Map();
 let audioCtx, micStream = null, micTrack = null, localAn = null, localBuf = null;
@@ -105,6 +105,7 @@ function alMensaje(m) {
     case 'dormir': espia = null; captura = null; despertar = null; elegidos = []; eleccionEnviada = false; aplicarMic(); render(); break;
     case 'ack': eleccionEnviada = true; toast('✔ Elección enviada'); render(); break;
     case 'sugerencia': borradores['info:' + m.id] = m.texto; render(); break;
+    case 'notas': notas = m.notas || {}; render(); break;
     case 'captura': captura = { titulo: m.titulo, grupos: m.grupos }; capturaHasta = Date.now() + (m.seg || 15) * 1000; render(); break;
     case 'grimorioEspia': espia = m.filas; espiaHasta = Date.now() + (m.seg || 15) * 1000; render(); break;
     case 'expulsado': alert(m.texto); location.hash = ''; location.reload(); break;
@@ -122,7 +123,7 @@ function alEstado(m) {
   if (!prev || prev.fase !== m.fase) {
     elegidos = []; armada = null; yoHabla = false;
     if (m.fase !== 'noche') { despertar = null; eleccionEnviada = false; }
-    if (m.fase === 'lobby') infos = [];
+    if (m.fase === 'lobby') { infos = []; notas = {}; }
     espia = null; captura = null; // las capturas no sobreviven a un cambio de fase
   }
   if (!m.yo.despierto && despertar && m.fase === 'noche') { /* el Narrador aún no lo ha dormido */ }
@@ -181,11 +182,14 @@ function renderMesa() {
     if (S.bloque && S.bloque.id === p.id) marcas.push(S.bloque.empate ? '⚖️❓' : '⚖️');
     const izq = []; if (S.silenciados.includes(p.id)) izq.push('🔇'); if (p.off) izq.push('📴'); if (awake.includes(p.id)) izq.push('🌙');
     const fp = soyNar && p.fichas ? p.fichas.filter(f => f !== 'muerto' || p.vivo).map(f => `<span title="${esc(FICHAS[f].nombre)}">${FICHAS[f].icono}</span>`).join('') : '';
+    const nt = !soyNar && p.id !== yo ? notas[p.id] : null;
+    const sub0 = nt && nt.rol ? `<span class="subnota">📝 ${esc(ROLES[nt.rol].nombre)}</span>` : '';
     const sub = soyNar && p.rol ? `${esc(ROLES[p.rol].nombre)}${p.cree ? ' · cree ' + esc(ROLES[p.cree].nombre) : ''}` : (S.fase === 'fin' && p.rol ? esc(ROLES[p.rol].nombre) : '');
     return `<div class="${cls.join(' ')}" data-id="${p.id}" tabindex="0" role="button" aria-label="${esc(p.nombre)}" style="--d:${d}px;left:${x}px;top:${y}px">
       <div class="ficha ${tipoCls}">${ico}</div>
+      ${nt ? `<div class="nota" title="Tu anotación${nt.texto ? ': ' + esc(nt.texto) : ''}">${nt.rol ? ROLES[nt.rol].icono : (nt.marca || '✎')}</div>` : ''}
       <div class="marcas">${marcas.join('')}</div><div class="marcas izq">${izq.join('')}</div>
-      <div class="nom">${esc(p.nombre)}</div>${sub ? `<div class="sub">${sub}</div>` : ''}
+      <div class="nom">${esc(p.nombre)}</div>${sub ? `<div class="sub">${sub}</div>` : sub0 ? `<div class="sub">${sub0}</div>` : ''}
       ${fp ? `<div class="fichasP">${fp}</div>` : ''}
     </div>`;
   }).join('');
@@ -241,6 +245,7 @@ function clickAsiento(id) {
 $('#lateral').addEventListener('input', e => { const k = e.target.dataset && e.target.dataset.draft; if (k) borradores[k] = e.target.value; });
 $('#lateral').addEventListener('toggle', e => { const k = e.target.dataset && e.target.dataset.k; if (k) { if (e.target.open) abiertos.add(k); else abiertos.delete(k); } }, true);
 $('#lateral').addEventListener('click', e => { const b = e.target.closest('[data-act]'); if (b) ACT[b.dataset.act] && ACT[b.dataset.act](b.dataset, b); });
+$('#lateral').addEventListener('keydown', e => { if ((e.key === 'Enter' || e.key === ' ') && e.target.dataset && e.target.dataset.act === 'seleccionar') { e.preventDefault(); ACT.seleccionar(e.target.dataset); } });
 $('#lateral').addEventListener('change', e => { const k = e.target.dataset && e.target.dataset.chg; if (k && CHG[k]) CHG[k](e.target.dataset, e.target); });
 $('#barra').addEventListener('click', e => { const b = e.target.closest('[data-act]'); if (b) ACT[b.dataset.act] && ACT[b.dataset.act](b.dataset, b); });
 
@@ -511,10 +516,43 @@ function htmlAjustes() {
     <label class="fila">Segundos que dura una captura (Espía y roles del Diablo) <input type="number" min="3" max="60" value="${a.espiaSeg}" data-chg="ajuste" data-k="espiaSeg" style="width:80px"></label></div>`);
 }
 
+// ═════ anotaciones privadas ═════
+const MARCAS = ['❌', '✅', '❓', '⭐', '🔴', '🔵'];
+const MARCA_TXT = { '❌': 'Mala pinta', '✅': 'Confío', '❓': 'Dudo', '⭐': 'Importante', '🔴': 'Creo que es malo', '🔵': 'Creo que es bueno' };
+function guardarNota(id, parcial) {
+  const n = Object.assign({ marca: '', rol: '', texto: '' }, notas[id], parcial);
+  if (!n.marca && !n.rol && !n.texto) delete notas[id]; else notas[id] = n; // se ve al instante; el servidor la guarda
+  enviar({ t: 'nota', id, marca: n.marca, rol: n.rol, texto: n.texto });
+  render();
+}
+function htmlNotas() {
+  if (soyNar) return '';
+  const t = sel && sel !== yo ? pj(sel) : null;
+  let h = '';
+  if (t) {
+    const n = Object.assign({ marca: '', rol: '', texto: '' }, notas[t.id]);
+    const roles = ['pueblerino', 'forastero', 'esbirro', 'diablo'].map(tp => `<optgroup label="${TIPO[tp]}s">${Object.entries(ROLES).filter(([, r]) => r.tipo === tp).map(([k, r]) => `<option value="${k}" ${k === n.rol ? 'selected' : ''}>${r.icono} ${r.nombre}</option>`).join('')}</optgroup>`).join('');
+    const k = 'nota:' + t.id, txt = borradores[k] !== undefined ? borradores[k] : n.texto;
+    h += `<div class="it"><b>📝 ${esc(t.nombre)}</b> <small>(solo lo ves tú)</small>
+      <div class="btns">${MARCAS.map(m => btn('notaMarca', m, `data-v="${m}" title="${esc(MARCA_TXT[m])}"`, n.marca === m ? 'mini on' : 'mini')).join('')}</div>
+      <div class="btns"><small>Creo que es:</small><select data-chg="notaRol"><option value="" ${n.rol ? '' : 'selected'}>— sin rol —</option>${roles}</select></div>
+      <input data-draft="${k}" data-chg="notaTexto" maxlength="80" placeholder="Nota (opcional)…" value="${esc(txt)}" style="width:100%" aria-label="Nota sobre ${esc(t.nombre)}">
+      ${n.marca || n.rol || n.texto ? `<div class="btns">${btn('notaBorrar', '🗑️ Borrar nota', '', 'mini')}</div>` : ''}
+      ${n.rol ? '<small>Con un rol apuntado, en el círculo se ve su icono en lugar de la marca.</small>' : ''}</div>`;
+  } else if (sel === yo) h += '<small>Esa eres tú. Toca a otro jugador para anotarlo.</small>';
+  else h += '<small>Toca a un jugador del círculo para marcarlo (❌ ✅ ❓…), apuntar el rol que crees que tiene o escribir una nota. <b>Solo tú las ves.</b></small>';
+  const lista = S.asientos.filter(id => notas[id] && pj(id) && id !== yo).map(id => {
+    const n = notas[id];
+    return `<div class="notaFila" data-act="seleccionar" data-id="${id}" role="button" tabindex="0"><span class="notaIco">${n.rol ? ROLES[n.rol].icono : (n.marca || '✎')}</span><span><b>${esc(nom(id))}</b>${n.rol ? ` · ${esc(ROLES[n.rol].nombre)}` : ''}${n.marca && n.rol ? ` ${n.marca}` : ''}${n.texto ? `<br><small class="tenue">${esc(n.texto)}</small>` : ''}</span></div>`;
+  });
+  if (lista.length) h += `<div style="margin-top:.4rem"><small class="tenue">Tus anotaciones (${lista.length}):</small>${lista.join('')}<div class="btns">${btn('notasLimpiar', '🧹 Borrar todas', '', 'mini')}</div></div>`;
+  return det('notas', '📝 Mis anotaciones', h, true);
+}
+
 // ═════ panel del jugador ═════
 function htmlJugador() {
   const p = pj(yo);
-  let h = htmlComposicion() + htmlSalas() + '<h3>Tu ficha</h3>';
+  let h = htmlComposicion() + htmlSalas() + htmlNotas() + '<h3>Tu ficha</h3>';
   if (p && p.rol && S.fase !== 'lobby') {
     const r = ROLES[p.rol], bando = r.equipo;
     h += `<div class="tarjeta ${bando === 'mal' ? 'mal' : 'bien'}"><div class="fila"><span class="ic">${r.icono}</span><div><b style="font-size:1.1rem">${r.nombre}</b><br><small>${TIPO[r.tipo]} · ${bando === 'mal' ? 'bando malvado' : 'bando bueno'}</small></div></div>
@@ -666,6 +704,11 @@ const ACT = {
   expulsar: () => sel && confirm(`¿Echar a ${nom(sel)} de la sala?`) && enviar({ t: 'expulsar', id: sel }),
   disparo: d => enviar({ t: 'disparo', id: +d.id, objetivo: +d.o, matar: d.v === '1' }),
   salaLimite: d => { const t = window.prompt('Máximo de personas en esta sala (0 = sin límite):'); if (t !== null && t.trim() !== '') enviar({ t: 'salaLimite', id: d.id, max: +t }); },
+  // anotaciones
+  notaMarca: d => { if (!sel) return; const n = notas[sel] || {}; guardarNota(sel, { marca: n.marca === d.v ? '' : d.v }); },
+  notaBorrar: () => sel && guardarNota(sel, { marca: '', rol: '', texto: '' }),
+  notasLimpiar: () => confirm('¿Borrar todas tus anotaciones?') && (notas = {}, enviar({ t: 'notasLimpiar' }), render()),
+  seleccionar: d => { sel = +d.id; render(); },
   // salas de voz
   unirSala: d => enviar({ t: 'sala', sala: d.id }),
   salaCrear: () => { const t = window.prompt('Nombre de la nueva sala:'); if (t) enviar({ t: 'salaCrear', nombre: t }); },
@@ -694,6 +737,8 @@ const CHG = {
     render();
   },
   cancRol: (d, el) => { borradores.cancRol = el.value; },
+  notaRol: (d, el) => sel && guardarNota(sel, { rol: el.value }),
+  notaTexto: (d, el) => { if (!sel) return; delete borradores['nota:' + sel]; guardarNota(sel, { texto: el.value.trim() }); },
   cazObj: (d, el) => { borradores.cazObj = el.value; render(); },
   sala: (d, el) => enviar({ t: 'moverJugador', id: +d.id, sala: el.value })
 };

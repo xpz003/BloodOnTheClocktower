@@ -61,6 +61,13 @@ Cada navegador se conecta directamente con todos los demás, y algunas redes (m�
   Puedes usar un `coturn` propio o un proveedor de TURN.
 - El audio se envía a poca velocidad (~24 kbps por persona) para que 15 jugadores sean llevaderos.
 
+## Anotaciones privadas
+Cada jugador tiene un **cuaderno** (📝 Mis anotaciones) que solo ve él: ni el Narrador ni los demás las reciben.
+- Toca a un jugador en el círculo y márcalo con ❌ ✅ ❓ ⭐ 🔴 🔵, apunta el **rol que crees que tiene** y/o escribe una nota (hasta 80 caracteres).
+- En el círculo aparece una insignia dorada junto a su ficha: la marca, o **el icono del rol en lugar de la marca** cuando apuntas un rol (con "📝 Nombre del rol" bajo su nombre, para no confundirlo con un rol real).
+- Un resumen lista todas tus anotaciones; al tocar una, se selecciona a ese jugador.
+- Se conservan si te desconectas y vuelves, y se borran al empezar una partida nueva.
+
 ## Moderación y reglas especiales
 - **Cazador:** el jugador lo anuncia en voz alta; no tiene botón. El Narrador selecciona su asiento, elige al objetivo y decide: *Matar al objetivo* o *Sin efecto*. Se marca solo la ficha "Habilidad usada".
 - **Silenciar:** el Narrador puede silenciar a un jugador, a todos, o activar "Al nominar, silenciar a todos menos al nominado" (dura mientras haya defensa y votación). **Todos ven quién está silenciado** (🔇 en el asiento, en las salas y en el panel).
